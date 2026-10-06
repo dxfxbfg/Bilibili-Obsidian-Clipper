@@ -28,6 +28,7 @@ const OUTPUT_MODE_VALUES = new Set(OUTPUT_MODES.map((item) => item.value));
 let latestPayload = null;
 let whisperPollTimer = 0;
 let whisperPollFailures = 0;
+let progressLeaveTimer = 0;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 const DEFAULT_SETTINGS = {
   downloadFormat: "srt",
@@ -414,7 +415,12 @@ function render(payload, { preserveStatus = false } = {}) {
     el.subtitleSelect.disabled = false;
   }
 
+  // 从"空预览"变成"有内容"时淡入，不要整块啪地出现
+  const hadPreview = Boolean(el.preview.value);
   setValue(el.preview, payload.subtitlePreview || "");
+  if (!hadPreview && el.preview.value) {
+    playEnter(document.querySelector(".preview-card"));
+  }
   setText(el.previewCount, countPreviewLines(payload.subtitlePreview));
   applyGenerationState(payload);
 }
@@ -441,9 +447,25 @@ function applyGenerationState(payload) {
   const progress = Math.max(0, Math.min(100, Number(payload?.progress) || 0));
 
   if (el.progress) {
-    el.progress.hidden = !generating;
-    if (el.progressFill) {
-      el.progressFill.style.width = `${progress}%`;
+    if (generating) {
+      window.clearTimeout(progressLeaveTimer);
+      progressLeaveTimer = 0;
+      el.progress.classList.remove("is-leaving");
+      setVisible(el.progress, true);
+      if (el.progressFill) {
+        el.progressFill.style.width = `${progress}%`;
+      }
+    } else if (!el.progress.hidden && !progressLeaveTimer) {
+      // 先让它走满再淡出，不要停在 60% 就消失
+      if (el.progressFill) {
+        el.progressFill.style.width = "100%";
+      }
+      el.progress.classList.add("is-leaving");
+      progressLeaveTimer = window.setTimeout(() => {
+        el.progress.hidden = true;
+        el.progress.classList.remove("is-leaving");
+        progressLeaveTimer = 0;
+      }, 240);
     }
   }
 
@@ -452,7 +474,7 @@ function applyGenerationState(payload) {
     // 这里必须把"已经有生成的字幕"也算进去，否则按钮会在完成那一刻消失。
     const canGenerate = Boolean(payload?.canGenerate);
     const hasTrack = Boolean(payload?.whisperTrack);
-    el.whisperBtn.hidden = !(canGenerate || hasTrack || generating);
+    setVisible(el.whisperBtn, canGenerate || hasTrack || generating);
     el.whisperBtn.disabled = generating;
     el.whisperBtn.textContent = generating
       ? "生成中…"
@@ -475,6 +497,27 @@ function setText(node, text) {
   if (node.textContent !== value) {
     node.textContent = value;
   }
+}
+
+/**
+ * 显隐切换。直接改 hidden 是瞬间跳变，"生硬"就来自这里；
+ * 从隐藏变可见时补一段进场动画。
+ */
+function setVisible(node, visible) {
+  if (!node) {
+    return;
+  }
+  const wasHidden = node.hidden;
+  node.hidden = !visible;
+  if (visible && wasHidden) {
+    playEnter(node);
+  }
+}
+
+function playEnter(node) {
+  node.classList.remove("boc-enter");
+  void node.offsetWidth;
+  node.classList.add("boc-enter");
 }
 
 function setValue(node, value) {

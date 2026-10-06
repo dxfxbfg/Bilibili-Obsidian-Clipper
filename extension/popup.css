@@ -75,6 +75,28 @@ body {
 }
 
 /* 打开时轻微错落入场，只做一次 */
+/* 元素进场的统一动画：显隐不再瞬间切换 */
+@keyframes boc-fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.boc-enter {
+  animation: boc-fade-rise 0.18s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boc-enter {
+    animation: none;
+  }
+}
+
 @keyframes boc-rise {
   from {
     opacity: 0;
@@ -217,6 +239,12 @@ body {
 .progress {
   flex: 0 0 auto;
   padding: 0 1px;
+  transition: opacity 0.22s ease;
+}
+
+/* 收尾时先淡出再移出布局，避免"啪"地消失 */
+.progress.is-leaving {
+  opacity: 0;
 }
 
 .progress[hidden] {
@@ -302,6 +330,7 @@ body {
 /* ---------- 预览 ---------- */
 
 .preview-card {
+  transition: opacity 0.2s ease;
   /* 固定高度：之前 flex:1 会把剩余空间全吃掉，弹窗白白被撑大 */
   flex: 0 0 auto;
   height: 96px;
