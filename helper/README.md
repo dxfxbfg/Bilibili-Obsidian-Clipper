@@ -68,13 +68,12 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.boc.whisper-helper.p
 
 ## 接口
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/health` | 依赖状态（whisper / ffmpeg / 模型） |
+| GET | `/health` | 依赖状态（whisper / ffmpeg / 模型）与运行时计数 |
 | POST | `/jobs` | 建任务，返回 `{job_id}` |
 | GET | `/jobs/<id>` | 轮询：`status` / `percent` / `message` / `cues` |
+| DELETE | `/jobs/<id>` | 释放任务：跑着的会终止子进程，完成的会释放结果 |
+| POST | `/cleanup` | 立即清理：释放过期结果 + 扫残留临时目录 |
 | POST | `/transcribe` | 同步版本，阻塞到出结果 |
-| DELETE | `/jobs/<id>` | 删任务 |
 
 请求体：
 
@@ -113,6 +112,26 @@ curl -s -X POST http://127.0.0.1:8788/jobs \
 - 调用方要带浏览器 UA，`Python-urllib` 之类的会被 403
 
 换别的服务用 `--translate-url`，只要兼容 `POST {"text": ...} → {"content": ...}`。
+
+## 临时文件与清理
+
+一次任务会在系统临时目录建一个 `boc-whisper-*` 工作目录，放音频、wav 和 whisper 的中间结果。清理策略：
+
+| 时机 | 行为 |
+|---|---|
+| 任务结束（成功或失败） | 立刻删掉自己的 `boc-whisper-*` 目录 |
+| 服务启动 | 扫一遍临时目录，删掉上次崩溃／被杀留下的残留（只删自己前缀的，且跳过 10 分钟内还热着的） |
+| 服务退出（Ctrl-C / SIGTERM） | 先终止正在跑的 whisper 子进程（避免变孤儿继续占 CPU），再删掉所有本进程的临时目录 |
+| 任务结果 | 完成的结果在内存里保留 30 分钟、最多 20 个，超时或超量自动释放；后台线程每分钟扫一次 |
+| 扩展取走结果 | 主动 `DELETE /jobs/<id>`，服务立即释放 |
+
+`--keep-temp` 会关掉自动删除（调试用），此时目录路径会打进日志。想手动催一次清理：
+
+```bash
+curl -X POST http://127.0.0.1:8788/cleanup
+```
+
+`GET /health` 里有 `temp_dirs`（本进程还开着的工作目录数）和 `running_jobs`，正常空闲时应为 `0`。
 
 ## 开销参考
 

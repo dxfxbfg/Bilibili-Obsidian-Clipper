@@ -1041,6 +1041,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "whisper-job-delete") {
+    const helperUrl = normalizeHelperBase(message.helperUrl);
+    const jobId = String(message.jobId || "").trim();
+    if (!helperUrl || !jobId) {
+      sendResponse({ ok: false, error: "缺少任务参数" });
+      return false;
+    }
+
+    // 用完就释放：让助手服务回收任务结果和临时文件
+    fetch(`${helperUrl}/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" })
+      .then((response) => sendResponse({ ok: response.ok }))
+      .catch((error) => sendResponse({ ok: false, error: describeHelperError(error) }));
+
+    return true;
+  }
+
   if (message.type === "write-obsidian-note") {
     const baseUrl = String(message.baseUrl || "").trim();
     const apiKey = String(message.apiKey || "").trim();

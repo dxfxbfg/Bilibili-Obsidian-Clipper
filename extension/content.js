@@ -1624,6 +1624,7 @@ async function generateSubtitleByWhisper() {
 
   const originalStatus = state.statusText;
   let finished = false;
+  let jobId = "";
   try {
     const created = await sendRuntimeMessage({
       type: "whisper-job-create",
@@ -1642,7 +1643,7 @@ async function generateSubtitleByWhisper() {
       throw new Error(created?.error || "提交任务失败");
     }
 
-    const jobId = created.jobId;
+    jobId = created.jobId;
     const deadline = Date.now() + 60 * 60 * 1000;
     let job = null;
     while (Date.now() < deadline) {
@@ -1702,6 +1703,9 @@ async function generateSubtitleByWhisper() {
     }
     finished = true;
     setStatus(`已生成字幕，共 ${cues.length} 条，可以复制、下载或发送到 Obsidian。`);
+
+    // 结果已经拿到手，通知助手释放任务与临时文件
+    sendRuntimeMessage({ type: "whisper-job-delete", helperUrl, jobId }).catch(() => {});
   } catch (error) {
     if (isExtensionContextInvalidated(error)) {
       setMessage("扩展刚刚更新，请刷新当前页面后重试。");
@@ -1710,6 +1714,10 @@ async function generateSubtitleByWhisper() {
       setStatus(originalStatus || "生成字幕失败。");
     }
     logWarn("[BOC] whisper 生成字幕失败", error);
+    // 任务可能还挂在那里，让助手释放掉
+    if (jobId && !finished) {
+      sendRuntimeMessage({ type: "whisper-job-delete", helperUrl, jobId }).catch(() => {});
+    }
   } finally {
     if (btn) {
       btn.textContent = "生成字幕（whisper）";

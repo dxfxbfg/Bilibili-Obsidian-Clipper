@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -93,6 +94,117 @@ CONFIG = {
 JOBS = {}
 JOB_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
+
+TEMP_PREFIX = "boc-whisper-"
+ACTIVE_WORKDIRS = set()   # 本进程创建、尚未清理的临时目录
+STALE_TEMP_AGE = 600      # 启动清扫：超过这个秒数没被动过的残留目录才算废弃
+JOB_RESULT_TTL = 1800     # 已完成任务的结果保留时长，超时释放内存
+MAX_FINISHED_JOBS = 20    # 最多保留多少个已完成任务的结果
+
+
+# ---------------------------------------------------------------- 清理
+
+def sweep_stale_workdirs():
+    """清掉上次崩溃/被杀留下的临时目录。只动自己的前缀，且跳过还热着的目录。"""
+    root = tempfile.gettempdir()
+    now = time.time()
+    removed = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.startswith(TEMP_PREFIX):
+            continue
+        path = os.path.join(root, name)
+        if path in ACTIVE_WORKDIRS or not os.path.isdir(path):
+            continue
+        try:
+            if now - os.path.getmtime(path) < STALE_TEMP_AGE:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        log(f"启动清扫：删除 {removed} 个残留临时目录")
+    return removed
+
+
+def drop_workdir(path):
+    """删除单个任务的工作目录，并从活跃集合里摘掉。"""
+    if not path:
+        return
+    ACTIVE_WORKDIRS.discard(path)
+    if CONFIG["keep_temp"]:
+        log(f"保留临时目录：{path}")
+        return
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def stop_job_proc(job, reason=""):
+    """终止任务正在跑的 whisper 子进程，避免它变成孤儿继续占 CPU。"""
+    proc = job.get("_proc") if isinstance(job, dict) else None
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            log(f"{job.get('id', '')[:8]} 已终止子进程{('：' + reason) if reason else ''}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"终止子进程失败：{exc}")
+
+
+def evict_finished_jobs():
+    """释放已完成任务的结果，避免服务常驻后内存无限增长。"""
+    now = time.time()
+    finished = [
+        (jid, job) for jid, job in JOBS.items()
+        if job.get("status") in ("done", "error", "cancelled")
+    ]
+    for jid, job in finished:
+        stamp = job.get("finished_at") or job.get("created_at") or now
+        if now - stamp > JOB_RESULT_TTL:
+            JOBS.pop(jid, None)
+
+    still = [(jid, job) for jid, job in JOBS.items()
+             if job.get("status") in ("done", "error", "cancelled")]
+    if len(still) <= MAX_FINISHED_JOBS:
+        return
+    still.sort(key=lambda kv: kv[1].get("finished_at") or kv[1].get("created_at") or 0)
+    for jid, _ in still[:len(still) - MAX_FINISHED_JOBS]:
+        JOBS.pop(jid, None)
+
+
+def cleanup_all():
+    """退出前收尾：停子进程 + 删所有本进程的临时目录。"""
+    for job in list(JOBS.values()):
+        if job.get("status") == "running":
+            job["_cancelled"] = True
+        stop_job_proc(job, "服务退出")
+    for path in list(ACTIVE_WORKDIRS):
+        ACTIVE_WORKDIRS.discard(path)
+        if not CONFIG["keep_temp"]:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def start_janitor():
+    """后台清理线程：过期结果和残留目录不依赖请求触发。"""
+    def loop():
+        while True:
+            time.sleep(60)
+            try:
+                evict_finished_jobs()
+                if not ACTIVE_WORKDIRS:
+                    sweep_stale_workdirs()
+            except Exception as exc:  # noqa: BLE001
+                log(f"清理线程异常：{exc}")
+
+    thread = threading.Thread(target=loop, daemon=True, name="boc-janitor")
+    thread.start()
+    return thread
 
 
 # ---------------------------------------------------------------- 工具
@@ -213,7 +325,7 @@ def probe_duration(path):
 
 # ---------------------------------------------------------------- 转写
 
-def transcribe(wav, model, language, threads, on_stage, duration=0):
+def transcribe(wav, model, language, threads, on_stage, duration=0, on_proc=None):
     out_prefix = os.path.join(os.path.dirname(wav), "asr")
     cmd = [CONFIG["whisper_bin"], "-m", model, "-f", wav, "-oj", "-of", out_prefix,
            "-t", str(threads)]
@@ -222,6 +334,8 @@ def transcribe(wav, model, language, threads, on_stage, duration=0):
 
     on_stage("transcribe", 30, "正在转写音频")
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if on_proc:
+        on_proc(proc)
 
     # 这个版本的 whisper-cli 没有进度回调，用分段行的时间戳推算进度
     total = 0.0
@@ -351,13 +465,17 @@ def translate_lines(texts, target, on_stage):
 
 def run_job(job_id, options):
     job = JOBS[job_id]
-    workdir = tempfile.mkdtemp(prefix="boc-whisper-")
+    workdir = tempfile.mkdtemp(prefix=TEMP_PREFIX)
+    ACTIVE_WORKDIRS.add(workdir)
 
     def on_stage(stage, percent, text):
         job["stage"] = stage
         job["percent"] = percent
         job["message"] = text
         log(f"{job_id[:8]} {percent:3d}% {text}")
+
+    def on_proc(proc):
+        job["_proc"] = proc
 
     try:
         with RUN_LOCK:
@@ -381,7 +499,7 @@ def run_job(job_id, options):
             job["cid"] = cid
             job["model"] = os.path.basename(model)
             wav, duration = prepare_wav(workdir, bvid, cid, options.get("aid", ""), on_stage)
-            cues = transcribe(wav, model, language, threads, on_stage, duration)
+            cues = transcribe(wav, model, language, threads, on_stage, duration, on_proc=on_proc)
             cues = apply_text_fixes(merge_sentences(cues))
 
             want_translate = bool(options.get("translate", CONFIG["translate_default"]))
@@ -409,19 +527,26 @@ def run_job(job_id, options):
             job["finished_at"] = time.time()
             log(f"{job_id[:8]} 完成，共 {len(cues)} 条")
     except Exception as exc:  # noqa: BLE001
-        job["status"] = "error"
-        job["error"] = str(exc)
-        job["message"] = str(exc)
-        log(f"{job_id[:8]} 失败：{exc}")
+        if job.get("_cancelled"):
+            job["status"] = "cancelled"
+            job["message"] = "任务已取消"
+            log(f"{job_id[:8]} 已取消")
+        else:
+            job["status"] = "error"
+            job["error"] = str(exc)
+            job["message"] = str(exc)
+            log(f"{job_id[:8]} 失败：{exc}")
+        job["finished_at"] = time.time()
     finally:
-        if not CONFIG["keep_temp"]:
-            shutil.rmtree(workdir, ignore_errors=True)
-        job.pop("_options", None)
+        job.pop("_proc", None)
+        job.pop("_cancelled", None)
+        drop_workdir(workdir)
 
 
 def create_job(options):
     if not options.get("bvid"):
         raise ValueError("缺少 bvid")
+    evict_finished_jobs()
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {
         "id": job_id,
@@ -431,9 +556,26 @@ def create_job(options):
         "message": "任务已创建",
         "created_at": time.time(),
     }
-    thread = threading.Thread(target=run_job, args=(job_id, options), daemon=True)
+    thread = threading.Thread(target=run_job, args=(job_id, options),
+                              daemon=True, name=f"boc-job-{job_id[:8]}")
     thread.start()
     return job_id
+
+
+def cancel_job(job_id):
+    """取消任务：正在跑的停子进程，已完成的直接释放结果。"""
+    job = JOBS.get(job_id)
+    if not job:
+        return False
+    if job.get("status") == "running":
+        job["_cancelled"] = True
+        stop_job_proc(job, "任务取消")
+        job["status"] = "cancelled"
+        job["message"] = "任务已取消"
+        job["finished_at"] = time.time()
+        return True
+    JOBS.pop(job_id, None)
+    return True
 
 
 # ---------------------------------------------------------------- HTTP
@@ -478,6 +620,10 @@ class Handler(BaseHTTPRequestHandler):
                 "model_found": bool(model),
                 "translate_default": CONFIG["translate_default"],
                 "jobs": len(JOBS),
+                "running_jobs": sum(1 for j in JOBS.values() if j.get("status") == "running"),
+                "temp_dirs": len(ACTIVE_WORKDIRS),
+                "temp_dir": tempfile.gettempdir(),
+                "keep_temp": CONFIG["keep_temp"],
             })
             return
         if path.startswith("/jobs/"):
@@ -486,16 +632,19 @@ class Handler(BaseHTTPRequestHandler):
             if not job:
                 self._send(404, {"ok": False, "error": "任务不存在"})
                 return
-            payload = {k: v for k, v in job.items() if k != "options"}
-            payload["ok"] = job["status"] != "error"
+            # 内部字段（子进程句柄等）不外传
+            payload = {k: v for k, v in job.items() if not k.startswith("_")}
+            payload["ok"] = job["status"] not in ("error", "cancelled")
             self._send(200, payload)
+            evict_finished_jobs()
             return
         if path in ("/", "/index.html"):
             self._send(200, {
                 "ok": True,
                 "service": "BOC 字幕助手",
                 "version": VERSION,
-                "endpoints": ["GET /health", "POST /jobs", "GET /jobs/<id>", "POST /transcribe"],
+                "endpoints": ["GET /health", "POST /jobs", "GET /jobs/<id>",
+                              "DELETE /jobs/<id>", "POST /cleanup", "POST /transcribe"],
             })
             return
         self._send(404, {"ok": False, "error": "未知路径"})
@@ -517,13 +666,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "job_id": job_id})
             return
 
+        if path == "/cleanup":
+            evict_finished_jobs()
+            removed = 0 if ACTIVE_WORKDIRS else sweep_stale_workdirs()
+            self._send(200, {"ok": True, "swept_temp_dirs": removed,
+                             "jobs_left": len(JOBS),
+                             "running_jobs": sum(1 for j in JOBS.values()
+                                                 if j.get("status") == "running")})
+            return
+
         if path == "/transcribe":
             job_id = create_job(options)
             job = JOBS[job_id]
             while job["status"] == "running":
                 time.sleep(0.5)
-            if job["status"] == "error":
-                self._send(500, {"ok": False, "error": job.get("error")})
+            if job["status"] != "done":
+                self._send(500, {"ok": False, "error": job.get("error") or job.get("message")})
                 return
             self._send(200, {"ok": True, "job_id": job_id, "cues": job["cues"]})
             return
@@ -534,8 +692,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith("/jobs/"):
             job_id = path.split("/", 2)[2]
-            JOBS.pop(job_id, None)
-            self._send(200, {"ok": True})
+            if cancel_job(job_id):
+                self._send(200, {"ok": True})
+            else:
+                self._send(404, {"ok": False, "error": "任务不存在"})
             return
         self._send(404, {"ok": False, "error": "未知路径"})
 
@@ -572,6 +732,8 @@ def main():
     log(f"  ffmpeg  : {CONFIG['ffmpeg_bin']} ({'ok' if which_ok(CONFIG['ffmpeg_bin']) else '未找到'})")
     log(f"  模型    : {model or '未找到，请用 --model 指定'}")
     log(f"  翻译    : {'默认开启' if CONFIG['translate_default'] else '默认关闭'}")
+    log(f"  临时目录: {tempfile.gettempdir()}"
+        f"{'（--keep-temp 已开启，不会自动删）' if CONFIG['keep_temp'] else ''}")
 
     if not which_ok(CONFIG["whisper_bin"]):
         log("提示：brew install whisper-cpp")
@@ -579,14 +741,32 @@ def main():
         log("提示：curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin "
             "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin")
 
+    # 上次被杀/崩溃留下的目录，启动先扫一遍
+    sweep_stale_workdirs()
+    start_janitor()
+
+    def on_signal(signum, _frame):
+        log(f"收到信号 {signum}，正在清理...")
+        cleanup_all()
+        # 交给主循环退出
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, on_signal)
+        except (ValueError, OSError):
+            pass
+
     log(f"监听 http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        log("退出")
+        pass
+    finally:
+        cleanup_all()
         server.server_close()
-        return 0
+        log("已退出，临时文件已清理")
     return 0
 
 
