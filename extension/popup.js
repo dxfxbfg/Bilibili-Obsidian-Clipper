@@ -8,7 +8,6 @@ const el = {
   previewCount: document.getElementById("previewCount"),
   subtitleSelect: document.getElementById("subtitleSelect"),
   preview: document.getElementById("preview"),
-  refreshBtn: document.getElementById("refreshBtn"),
   copyBtn: document.getElementById("copyBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   sendBtn: document.getElementById("sendBtn"),
@@ -90,10 +89,6 @@ function extractBvid(url) {
 }
 
 function bindEvents() {
-  el.refreshBtn.addEventListener("click", async () => {
-    await refreshFromTab();
-  });
-
   el.copyBtn.addEventListener("click", async () => {
     const payload = await ensurePayload();
     if (!payload?.markdown) {
@@ -357,6 +352,10 @@ function render(payload, { preserveStatus = false } = {}) {
     setMessage(`页面里是旧版脚本（${payload.contentVersion}），请刷新页面（⌘R / Ctrl+R）后再试。`);
   }
 
+  // 正常状态下内容都在眼前，再报一遍条数只是噪音；
+  // 只有需要用户注意时才显示状态条（生成中 / 出错 / 没有字幕）。
+  el.status.hidden = !shouldShowStatus(payload);
+
   setText(el.videoTitle, payload.title || "尚未识别视频");
   el.videoTitle.title = payload.title || "";
   setText(el.videoMeta, buildMetaLine(payload));
@@ -392,6 +391,21 @@ function render(payload, { preserveStatus = false } = {}) {
   el.preview.value = payload.subtitlePreview || "";
   setText(el.previewCount, countPreviewLines(payload.subtitlePreview));
   applyGenerationState(payload);
+}
+
+function shouldShowStatus(payload) {
+  if (!payload) {
+    return true;
+  }
+  if (payload.generating || payload.canGenerate) {
+    return true;
+  }
+  const statusText = String(payload.status || "");
+  if (/失败|错误|无字幕|不支持|请刷新/.test(statusText)) {
+    return true;
+  }
+  // 还没抓到任何内容时也别沉默
+  return !hasUsableSubtitle(payload);
 }
 
 function buildMetaLine(payload) {

@@ -1253,7 +1253,7 @@ async function refreshClip() {
       startReaderPlayerObserver();
       syncReadingViewPlayback(true);
     }
-    setStatus("抓取完成，可以复制、下载或发送到 Obsidian。");
+    setStatus(`字幕已就绪，共 ${state.subtitleBody.length} 条`);
   } catch (error) {
     if (isStaleRunError(error)) {
       return;
@@ -1747,7 +1747,7 @@ async function runWhisperGeneration(outputOverride) {
       syncReadingViewPlayback(true);
     }
     finished = true;
-    setStatus(`已生成字幕，共 ${cues.length} 条，可以复制、下载或发送到 Obsidian。`);
+    setStatus(`已生成 ${cues.length} 条字幕`);
 
     // 结果已经拿到手，通知助手释放任务与临时文件
     sendRuntimeMessage({ type: "whisper-job-delete", helperUrl, jobId }).catch(() => {});

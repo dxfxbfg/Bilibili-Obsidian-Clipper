@@ -22,8 +22,8 @@
   --ok: #34d399;
   --err: #f87171;
 
-  --r-sm: 6px;
-  --r-md: 8px;
+  --r-sm: 9px;
+  --r-md: 12px;
 }
 
 html,
@@ -34,10 +34,10 @@ body {
    * 弹窗尺寸由内容决定，不能用 vw/vh：那会形成循环依赖、解析成极小值，
    * 整个框会塌掉。固定尺寸 + 下限，放不下交给浏览器夹、容器滚动兜底。
    */
-  width: 340px;
-  min-width: 300px;
-  height: 480px;
-  min-height: 400px;
+  width: 320px;
+  min-width: 288px;
+  height: 440px;
+  min-height: 372px;
   background: var(--canvas);
   color: var(--text);
   /* UI 用 SF Pro，跟系统一致；技术性内容另用等宽，靠字体对比建立层次 */
@@ -49,9 +49,9 @@ body {
 
 .popup {
   height: 100%;
-  min-height: 400px;
+  min-height: 372px;
   box-sizing: border-box;
-  padding: 12px;
+  padding: 11px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -130,8 +130,8 @@ body {
 
 .brand::before {
   content: "";
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: var(--accent);
 }
@@ -183,7 +183,7 @@ body {
 
 .video-title {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.35;
   letter-spacing: -0.1px;
@@ -215,13 +215,17 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.5;
   color: var(--text-dim);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  padding: 8px 10px;
+  padding: 7px 10px;
+}
+
+.status[hidden] {
+  display: none;
 }
 
 .status::before {
@@ -229,7 +233,7 @@ body {
   flex: 0 0 auto;
   width: 5px;
   height: 5px;
-  margin-top: 5px;
+  margin-top: 4px;
   border-radius: 50%;
   background: var(--text-faint);
 }
@@ -282,11 +286,12 @@ body {
 .field {
   flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
 }
 
 .field-label {
+  flex: 0 0 auto;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -294,22 +299,23 @@ body {
 }
 
 #subtitleSelect {
-  width: 100%;
-  height: 32px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
   box-sizing: border-box;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   padding: 0 9px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-faint) 50%),
     linear-gradient(135deg, var(--text-faint) 50%, transparent 50%);
-  background-position: calc(100% - 15px) 14px, calc(100% - 10px) 14px;
+  background-position: calc(100% - 15px) 13px, calc(100% - 10px) 13px;
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
@@ -338,7 +344,8 @@ body {
 /* ---------- 预览 ---------- */
 
 .preview-card {
-  flex: 1 1 auto;
+  /* basis 归零，剩余空间才分得准；auto 会多占几个像素导致溢出 */
+  flex: 1 1 0;
   min-height: 72px;
   display: flex;
   flex-direction: column;
@@ -353,7 +360,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 11px 0;
+  padding: 8px 10px 0;
 }
 
 .preview-count {
@@ -370,10 +377,10 @@ body {
   box-sizing: border-box;
   border: none;
   outline: none;
-  padding: 6px 11px 11px;
+  padding: 5px 10px 10px;
   resize: none;
-  font-size: 11.5px;
-  line-height: 1.7;
+  font-size: 11px;
+  line-height: 1.65;
   background: transparent;
   color: var(--text-dim);
   overflow-y: auto;
@@ -399,7 +406,7 @@ body {
 .actions {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -407,8 +414,8 @@ body {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.02);
   border-radius: var(--r-md);
-  padding: 7px 0;
-  font-size: 12px;
+  padding: 6px 0;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--text-dim);
   cursor: pointer;
@@ -428,7 +435,7 @@ body {
   background: var(--accent-glow);
   border-radius: var(--r-md);
   padding: 8px 0;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent);
   cursor: pointer;
@@ -449,8 +456,8 @@ body {
   border: none;
   background: var(--accent);
   border-radius: var(--r-md);
-  padding: 9px 0;
-  font-size: 13px;
+  padding: 8px 0;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--accent-ink);
   cursor: pointer;
