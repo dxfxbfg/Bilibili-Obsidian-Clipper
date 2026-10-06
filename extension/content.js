@@ -5562,7 +5562,14 @@ function buildMarkdown(meta, body, settings) {
     settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
   );
   if (hotCommentLines.length > 0) {
-    lines.push("", "## 评论", "", ...hotCommentLines);
+    const commentCount = normalizeHotComments(meta?.hotComments || [], 20).length;
+    // 评论和字幕是同类"参考材料"，同样折叠——否则末尾又拖出一大段
+    if (settings.collapseSubtitleInNote !== false) {
+      lines.push("", `> [!note]- 评论（${commentCount} 条 · 点击展开）`);
+      lines.push(...hotCommentLines.map((line) => (line ? `> ${line}` : ">")));
+    } else {
+      lines.push("", "## 评论", "", ...hotCommentLines);
+    }
   }
 
   return lines.join("\n");
