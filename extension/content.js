@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。",
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
+  noteSectionPlaceholder: "- 一句话总结：\n- 值得记下的：\n- 想做的：",
   noteVideoMode: "none",
   enableDebugLogs: false,
   enableWhisperFallback: true,
@@ -5534,6 +5535,17 @@ function buildMarkdown(meta, body, settings) {
   ).trim();
   if (noteSectionTitle) {
     lines.push(`## ${noteSectionTitle}`, "");
+
+    // 占位内容：给一个直接能填的骨架，不用的行删掉即可。
+    // 设为空串则只留标题。
+    const placeholder = String(
+      settings.noteSectionPlaceholder === undefined
+        ? "- 一句话总结：\n- 值得记下的：\n- 想做的："
+        : settings.noteSectionPlaceholder
+    ).trim();
+    if (placeholder) {
+      lines.push(...placeholder.split("\n").map((line) => line.replace(/\s+$/, "")), "");
+    }
   }
 
   pushOptionalLines(lines, noteSections.before_intro);

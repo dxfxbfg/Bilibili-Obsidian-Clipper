@@ -40,6 +40,7 @@ const DEFAULT_SYNC_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
+  noteSectionPlaceholder: "- 一句话总结：\n- 值得记下的：\n- 想做的：",
   noteVideoMode: "none",
   enableDebugLogs: false,
   popupShowCopy: true,

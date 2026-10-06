@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
+  noteSectionPlaceholder: "- 一句话总结：\n- 值得记下的：\n- 想做的：",
   noteVideoMode: "none",
   enableDebugLogs: false,
   popupShowCopy: true,
@@ -101,6 +102,7 @@ const elements = {
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
   noteVideoMode: document.getElementById("noteVideoMode"),
   noteSectionTitle: document.getElementById("noteSectionTitle"),
+  noteSectionPlaceholder: document.getElementById("noteSectionPlaceholder"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
   popupShowCopy: document.getElementById("popupShowCopy"),
   popupShowDownload: document.getElementById("popupShowDownload"),
@@ -167,6 +169,10 @@ async function loadSettings() {
   elements.noteVideoMode.value = ["link", "embed", "none"].includes(settings.noteVideoMode)
     ? settings.noteVideoMode
     : "none";
+  elements.noteSectionPlaceholder.value =
+    settings.noteSectionPlaceholder === undefined
+      ? "- 一句话总结：\n- 值得记下的：\n- 想做的："
+      : String(settings.noteSectionPlaceholder || "");
   elements.noteSectionTitle.value =
     settings.noteSectionTitle === undefined ? "我的笔记" : String(settings.noteSectionTitle || "");
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
@@ -296,6 +302,7 @@ function collectFormPayload() {
     includeTimestampInBody: elements.includeTimestampInBody.checked,
     noteVideoMode: elements.noteVideoMode.value,
     noteSectionTitle: String(elements.noteSectionTitle.value || "").trim(),
+    noteSectionPlaceholder: String(elements.noteSectionPlaceholder.value || "").trim(),
     enableDebugLogs: elements.enableDebugLogs.checked,
     popupShowCopy: elements.popupShowCopy.checked,
     popupShowDownload: elements.popupShowDownload.checked,
