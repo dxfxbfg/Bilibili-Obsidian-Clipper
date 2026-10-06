@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.4";
+const BOC_VERSION = "1.1.5";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 const state = {
@@ -64,6 +64,7 @@ const state = {
   subtitleBody: [],
   subtitleFetchState: "idle",
   whisperGenerating: false,
+  whisperProgress: 0,
   chapters: [],
   hotComments: [],
   markdown: "",
@@ -491,6 +492,11 @@ function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-refresh") {
+      // 生成中不要重新抓取：会把 state 清空、把进度冲掉
+      if (state.whisperGenerating) {
+        sendResponse({ ok: true, payload: getPopupPayload() });
+        return false;
+      }
       refreshClip()
         .then(() => sendResponse({ ok: true, payload: getPopupPayload() }))
         .catch((error) =>
@@ -1564,7 +1570,8 @@ function getPopupPayload() {
     downloadFormat: normalizeDownloadFormat(state.settings?.downloadFormat),
     subtitleOptions,
     canGenerate: canGenerateSubtitle(),
-    generating: Boolean(state.whisperGenerating)
+    generating: Boolean(state.whisperGenerating),
+    progress: state.whisperGenerating ? Number(state.whisperProgress) || 0 : 0
   };
 }
 
@@ -1623,6 +1630,7 @@ async function generateSubtitleByWhisper() {
     return;
   }
   state.whisperGenerating = true;
+  state.whisperProgress = 0;
   try {
     await runWhisperGeneration();
   } finally {
@@ -1690,7 +1698,8 @@ async function runWhisperGeneration() {
       }
       job = resp.job;
       if (job.status === "running") {
-        setStatus(`生成字幕中 ${Number(job.percent) || 0}%：${job.message || ""}`);
+        state.whisperProgress = Number(job.percent) || 0;
+        setStatus(`生成字幕中 ${state.whisperProgress}%：${job.message || ""}`);
         continue;
       }
       break;

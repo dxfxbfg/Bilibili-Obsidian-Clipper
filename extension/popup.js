@@ -1,5 +1,7 @@
 const el = {
   status: document.getElementById("status"),
+  progress: document.getElementById("progress"),
+  progressFill: document.getElementById("progressFill"),
   message: document.getElementById("message"),
   propTitle: document.getElementById("propTitle"),
   propUrl: document.getElementById("propUrl"),
@@ -47,6 +49,14 @@ async function init() {
     render(cached?.payload || latestPayload, { preserveStatus: true });
     return;
   }
+
+  // 转写是在页面里跑的，弹窗重新打开时要接着看进度，而不是从头抓一遍
+  if (cached.payload?.generating) {
+    render(cached.payload);
+    pollWhisperProgress();
+    return;
+  }
+
   if (isSameVideo(cached.payload?.url, tab?.url) && hasUsableSubtitle(cached.payload)) {
     render(cached.payload);
     return;
@@ -252,8 +262,15 @@ function pollWhisperProgress() {
       whisperPollFailures += 1;
     } else {
       whisperPollFailures = 0;
-      render(payload);
-      if (!payload.generating) {
+      if (payload.generating) {
+        // 生成期间只动进度和状态，别重建整个面板
+        applyGenerationState(payload);
+        const statusText = String(payload.status || "").trim();
+        if (statusText) {
+          setStatus(statusText);
+        }
+      } else {
+        render(payload);
         return;
       }
     }
@@ -326,11 +343,26 @@ function render(payload, { preserveStatus = false } = {}) {
   }
 
   el.preview.value = payload.subtitlePreview || "";
+  applyGenerationState(payload);
+}
 
-  // 生成字幕入口：视频确实没有字幕轨、且设置里开着时才出现
+/**
+ * 只更新与"生成字幕"相关的节点。
+ * 轮询期间不能整个 render：重建 select 的 innerHTML 会让面板闪、也会白费布局。
+ */
+function applyGenerationState(payload) {
+  const generating = Boolean(payload?.generating);
+  const progress = Math.max(0, Math.min(100, Number(payload?.progress) || 0));
+
+  if (el.progress) {
+    el.progress.hidden = !generating;
+    if (el.progressFill) {
+      el.progressFill.style.width = `${progress}%`;
+    }
+  }
+
   if (el.whisperBtn) {
-    const generating = Boolean(payload.generating);
-    const canGenerate = Boolean(payload.canGenerate);
+    const canGenerate = Boolean(payload?.canGenerate);
     el.whisperBtn.hidden = !canGenerate && !generating;
     el.whisperBtn.disabled = generating;
     el.whisperBtn.textContent = generating ? "生成中…" : "生成字幕（whisper）";

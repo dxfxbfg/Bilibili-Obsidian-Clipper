@@ -126,6 +126,31 @@ body {
   border-color: var(--err-border);
 }
 
+.progress {
+  flex: 0 0 auto;
+  padding: 0 2px;
+}
+
+.progress[hidden] {
+  display: none;
+}
+
+.progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #e8e8f0;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  /* 轮询是 1.2 秒一次，靠过渡把跳变补成连续推进 */
+  transition: width 0.45s ease-out;
+}
+
 .section-title,
 .label {
   flex: 0 0 auto;

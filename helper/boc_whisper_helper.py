@@ -162,6 +162,55 @@ def stop_job_proc(job, reason=""):
             log(f"终止子进程失败：{exc}")
 
 
+RESULT_CACHE = {}         # 相同视频+相同参数直接复用，省一次完整转写
+CACHE_TTL = 1800
+CACHE_MAX = 5
+
+
+def build_cache_key(options):
+    model = find_model(options.get("model", ""))
+    translate = bool(options.get("translate", CONFIG["translate_default"]))
+    output = str(options.get("output") or ("bilingual" if translate else "original"))
+    return "|".join([
+        str(options.get("bvid") or ""),
+        str(options.get("cid") or ""),
+        str(options.get("language") or "en"),
+        os.path.basename(model),
+        "1" if translate else "0",
+        output,
+        str(options.get("beam_size") or CONFIG["beam_size"]),
+    ])
+
+
+def cache_lookup(options):
+    key = build_cache_key(options)
+    item = RESULT_CACHE.get(key)
+    if not item:
+        return None
+    if time.time() - item["at"] > CACHE_TTL:
+        RESULT_CACHE.pop(key, None)
+        return None
+    return item["cues"]
+
+
+def cache_store(options, cues):
+    if not cues:
+        return
+    RESULT_CACHE[build_cache_key(options)] = {"at": time.time(), "cues": cues}
+    if len(RESULT_CACHE) > CACHE_MAX:
+        for key, _ in sorted(RESULT_CACHE.items(), key=lambda kv: kv[1]["at"])[
+            : len(RESULT_CACHE) - CACHE_MAX
+        ]:
+            RESULT_CACHE.pop(key, None)
+
+
+def cache_evict_expired():
+    now = time.time()
+    for key, item in list(RESULT_CACHE.items()):
+        if now - item["at"] > CACHE_TTL:
+            RESULT_CACHE.pop(key, None)
+
+
 def evict_finished_jobs():
     """释放已完成任务的结果，避免服务常驻后内存无限增长。"""
     now = time.time()
@@ -202,6 +251,7 @@ def start_janitor():
             time.sleep(60)
             try:
                 evict_finished_jobs()
+                cache_evict_expired()
                 if not ACTIVE_WORKDIRS:
                     sweep_stale_workdirs()
             except Exception as exc:  # noqa: BLE001
@@ -441,7 +491,7 @@ def apply_text_fixes(cues):
 
 # ---------------------------------------------------------------- 翻译
 
-TRANSLATE_CHUNK_LINES = 40
+TRANSLATE_MIN_LINES = 16
 TRANSLATE_WORKERS = 4
 
 
@@ -453,9 +503,13 @@ def translate_lines(texts, target, on_stage):
     if not total:
         return []
 
+    # 均分而不是定长切：88 行按 40 切会得到 40/40/8，前两批拖住整体，
+    # 均分成 22×4 才吃满并发。
+    workers = max(1, min(TRANSLATE_WORKERS, -(-total // TRANSLATE_MIN_LINES)))
+    per_chunk = -(-total // workers)
     chunks = []
-    for start in range(0, total, TRANSLATE_CHUNK_LINES):
-        chunk = texts[start:start + TRANSLATE_CHUNK_LINES]
+    for start in range(0, total, per_chunk):
+        chunk = texts[start:start + per_chunk]
         body = "\n".join(f"{start + i + 1}. {t}" for i, t in enumerate(chunk))
         chunks.append((start, body))
 
@@ -561,6 +615,7 @@ def run_job(job_id, options):
             job["percent"] = 100
             job["message"] = f"完成，共 {len(cues)} 条"
             job["finished_at"] = time.time()
+            cache_store(options, cues)
             log(f"{job_id[:8]} 完成，共 {len(cues)} 条")
     except Exception as exc:  # noqa: BLE001
         if job.get("_cancelled"):
@@ -583,7 +638,31 @@ def create_job(options):
     if not options.get("bvid"):
         raise ValueError("缺少 bvid")
     evict_finished_jobs()
+
+    # cid 缺失时先补上，缓存键才稳定（补不上就让任务自己去报错）
+    if not options.get("cid"):
+        try:
+            options["cid"] = resolve_cid(options["bvid"], "")
+        except Exception:  # noqa: BLE001
+            pass
+
     job_id = uuid.uuid4().hex
+    cached = cache_lookup(options)
+    if cached is not None:
+        JOBS[job_id] = {
+            "id": job_id,
+            "status": "done",
+            "stage": "cached",
+            "percent": 100,
+            "message": f"命中缓存，共 {len(cached)} 条",
+            "cues": cached,
+            "cached": True,
+            "created_at": time.time(),
+            "finished_at": time.time(),
+        }
+        log(f"{job_id[:8]} 命中缓存")
+        return job_id
+
     JOBS[job_id] = {
         "id": job_id,
         "status": "running",
@@ -660,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
                 "temp_dirs": len(ACTIVE_WORKDIRS),
                 "temp_dir": tempfile.gettempdir(),
                 "keep_temp": CONFIG["keep_temp"],
+                "cached_results": len(RESULT_CACHE),
             })
             return
         if path.startswith("/jobs/"):
@@ -704,9 +784,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/cleanup":
             evict_finished_jobs()
+            cache_evict_expired()
             removed = 0 if ACTIVE_WORKDIRS else sweep_stale_workdirs()
             self._send(200, {"ok": True, "swept_temp_dirs": removed,
                              "jobs_left": len(JOBS),
+                             "cached_results": len(RESULT_CACHE),
                              "running_jobs": sum(1 for j in JOBS.values()
                                                  if j.get("status") == "running")})
             return
