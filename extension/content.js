@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。",
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
+  noteVideoMode: "link",
   collapseSubtitleInNote: true,
   enableDebugLogs: false,
   enableWhisperFallback: true,
@@ -5516,7 +5517,6 @@ function buildMarkdown(meta, body, settings) {
   const frontMatter = buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml);
 
   const page = extractPageIndex(location.href);
-  const embedIframe = buildBilibiliEmbedIframe(meta, page);
   const intro = String(meta.description || "").trim();
   const noteSectionContext = buildNotePlaceholderTemplateContext(meta, intro);
   const noteSections = groupNotePlaceholderSections(settings, noteSectionContext);
@@ -5525,7 +5525,7 @@ function buildMarkdown(meta, body, settings) {
   if (frontMatter) {
     lines.push(frontMatter, "");
   }
-  lines.push(embedIframe, "");
+  pushOptionalLines(lines, buildVideoBlock(meta, page, settings));
 
   // 边看边记：笔记区紧跟视频。原来视频下面是整段字幕，笔记区被埋到最底下，
   // 往下写的时候视频早滚出视野了。留空段落（默认"我的笔记"）也可以关掉。
@@ -5967,6 +5967,31 @@ function buildBilibiliEmbedIframe(meta, page = 1) {
   const safePage = Number(page) > 0 ? Number(page) : 1;
 
   return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0&high_quality=1&danmaku=0&as_wide=1" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
+}
+
+/**
+ * 视频块。默认只放一行链接——嵌入播放器跑在 Obsidian 自己的 webview 里，
+ * 拿不到 B 站登录态，画质被锁在 360p 左右，还不如点开在浏览器里看。
+ */
+function buildVideoBlock(meta, page, settings) {
+  const mode = String(settings?.noteVideoMode || "link");
+  if (mode === "none") {
+    return [];
+  }
+  if (mode === "embed") {
+    return [buildBilibiliEmbedIframe(meta, page), ""];
+  }
+  const url = buildVideoPageUrl(meta, page);
+  return url ? [`[在浏览器打开](${url})`, ""] : [];
+}
+
+function buildVideoPageUrl(meta, page) {
+  const bvid = String(meta?.bvid || "").trim();
+  if (!bvid) {
+    return String(cleanVideoUrl() || "").trim();
+  }
+  const suffix = Number(page) > 1 ? `?p=${Number(page)}` : "";
+  return `https://www.bilibili.com/video/${bvid}/${suffix}`;
 }
 
 function buildSrt(body) {

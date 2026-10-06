@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
+  noteVideoMode: "link",
   collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
@@ -99,6 +100,7 @@ const elements = {
   enablePlayerAiQuickAction: document.getElementById("enablePlayerAiQuickAction"),
   playerAiQuickPrompt: document.getElementById("playerAiQuickPrompt"),
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
+  noteVideoMode: document.getElementById("noteVideoMode"),
   noteSectionTitle: document.getElementById("noteSectionTitle"),
   collapseSubtitleInNote: document.getElementById("collapseSubtitleInNote"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
@@ -164,6 +166,9 @@ async function loadSettings() {
   elements.enablePlayerAiQuickAction.checked = Boolean(settings.enablePlayerAiQuickAction);
   elements.playerAiQuickPrompt.value = String(settings.playerAiQuickPrompt || "");
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
+  elements.noteVideoMode.value = ["link", "embed", "none"].includes(settings.noteVideoMode)
+    ? settings.noteVideoMode
+    : "link";
   elements.noteSectionTitle.value =
     settings.noteSectionTitle === undefined ? "我的笔记" : String(settings.noteSectionTitle || "");
   elements.collapseSubtitleInNote.checked = settings.collapseSubtitleInNote !== false;
@@ -292,6 +297,7 @@ function collectFormPayload() {
     enablePlayerAiQuickAction: elements.enablePlayerAiQuickAction.checked,
     playerAiQuickPrompt: normalizePlayerAiQuickPrompt(elements.playerAiQuickPrompt.value),
     includeTimestampInBody: elements.includeTimestampInBody.checked,
+    noteVideoMode: elements.noteVideoMode.value,
     noteSectionTitle: String(elements.noteSectionTitle.value || "").trim(),
     collapseSubtitleInNote: elements.collapseSubtitleInNote.checked,
     enableDebugLogs: elements.enableDebugLogs.checked,

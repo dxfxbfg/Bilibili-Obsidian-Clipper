@@ -40,6 +40,7 @@ const DEFAULT_SYNC_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
+  noteVideoMode: "link",
   collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
