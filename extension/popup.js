@@ -11,12 +11,15 @@ const el = {
   copyBtn: document.getElementById("copyBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   sendBtn: document.getElementById("sendBtn"),
+  whisperBtn: document.getElementById("whisperBtn"),
   readingViewBtn: document.getElementById("readingViewBtn"),
   aiBtn: document.getElementById("aiBtn"),
   settingsBtn: document.getElementById("settingsBtn")
 };
 
 let latestPayload = null;
+let whisperPollTimer = 0;
+let whisperPollFailures = 0;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 const DEFAULT_SETTINGS = {
   downloadFormat: "srt"
@@ -86,6 +89,19 @@ function bindEvents() {
       setMessage(`发送失败：${resp?.error || "未知错误"}`);
     }
     render(resp?.payload || latestPayload);
+  });
+
+  el.whisperBtn?.addEventListener("click", async () => {
+    el.whisperBtn.disabled = true;
+    setStatus("正在提交转写任务...");
+    const resp = await sendToContent({ type: "popup-generate-subtitle" });
+    if (!resp?.ok) {
+      setStatus(`生成失败：${resp?.error || "未知错误"}`, true);
+      render(resp?.payload || latestPayload, { preserveStatus: true });
+      return;
+    }
+    render(resp?.payload || latestPayload);
+    pollWhisperProgress();
   });
 
   el.readingViewBtn?.addEventListener("click", async () => {
@@ -185,6 +201,38 @@ async function refreshFromTab() {
   render(resp?.payload || latestPayload);
 }
 
+/**
+ * 转写在页面里跑，popup 只负责看进度。
+ * 必须轮询而不是 await：popup 一失焦就被关掉，任务不能跟着死。
+ */
+function pollWhisperProgress() {
+  window.clearTimeout(whisperPollTimer);
+  whisperPollFailures = 0;
+
+  async function tick() {
+    const resp = await sendToContent({ type: "popup-get-state" });
+    const payload = resp?.payload || null;
+    if (!payload) {
+      return;
+    }
+    if (resp?.ok === false && whisperPollFailures < 5) {
+      // 页面正好在切换之类的情况，再给几次机会
+      whisperPollFailures += 1;
+    } else {
+      whisperPollFailures = 0;
+      render(payload);
+      if (!payload.generating) {
+        return;
+      }
+    }
+    whisperPollTimer = window.setTimeout(tick, 1200);
+  }
+
+  tick();
+}
+
+window.addEventListener("unload", () => window.clearTimeout(whisperPollTimer));
+
 async function ensurePayload() {
   if (latestPayload) {
     return latestPayload;
@@ -208,6 +256,16 @@ function render(payload, { preserveStatus = false } = {}) {
     setStatus(statusText, isErrorStatus);
   }
   setMessage(payload.message || "");
+
+  // 页面里可能还挂着旧版注入脚本（扩展更新后没有刷新页面），
+  // 那种情况下新入口是不存在的，直接说清楚而不是让人对着没反应的按钮猜。
+  if (
+    payload.contentVersion &&
+    EXPECTED_CONTENT_SCRIPT_VERSION &&
+    payload.contentVersion !== EXPECTED_CONTENT_SCRIPT_VERSION
+  ) {
+    setMessage(`页面里是旧版脚本（${payload.contentVersion}），请刷新页面（⌘R / Ctrl+R）后再试。`);
+  }
 
   setText(el.propTitle, payload.title || "-");
   setText(el.propUrl, payload.url || "-");
@@ -236,6 +294,15 @@ function render(payload, { preserveStatus = false } = {}) {
   }
 
   el.preview.value = payload.subtitlePreview || "";
+
+  // 生成字幕入口：视频确实没有字幕轨、且设置里开着时才出现
+  if (el.whisperBtn) {
+    const generating = Boolean(payload.generating);
+    const canGenerate = Boolean(payload.canGenerate);
+    el.whisperBtn.hidden = !canGenerate && !generating;
+    el.whisperBtn.disabled = generating;
+    el.whisperBtn.textContent = generating ? "生成中…" : "生成字幕（whisper）";
+  }
 }
 
 function setText(node, text) {

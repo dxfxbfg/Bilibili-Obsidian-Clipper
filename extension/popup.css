@@ -200,6 +200,27 @@ body {
   cursor: pointer;
 }
 
+.whisper {
+  width: 100%;
+  border: 1px dashed var(--action-accent);
+  background: var(--button-bg);
+  border-radius: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--action-accent);
+  cursor: pointer;
+}
+
+.whisper[hidden] {
+  display: none;
+}
+
+.whisper[disabled] {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .send {
   border: 1px solid #a88fff;
   background: linear-gradient(180deg, #9c82ff 0%, #8f75ef 100%);

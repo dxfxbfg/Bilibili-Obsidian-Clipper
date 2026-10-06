@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.3";
+const BOC_VERSION = "1.1.4";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 const state = {
@@ -63,6 +63,7 @@ const state = {
   selectedSubtitleLang: "",
   subtitleBody: [],
   subtitleFetchState: "idle",
+  whisperGenerating: false,
   chapters: [],
   hotComments: [],
   markdown: "",
@@ -525,6 +526,22 @@ function bindRuntimeEvents() {
           sendResponse({ ok: false, error: getErrorMessage(error), payload: getPopupPayload() })
         );
       return true;
+    }
+
+    if (message.type === "popup-generate-subtitle") {
+      if (state.whisperGenerating) {
+        sendResponse({ ok: true, payload: getPopupPayload() });
+        return false;
+      }
+      if (!canGenerateSubtitle()) {
+        sendResponse({ ok: false, error: "当前视频不满足生成条件", payload: getPopupPayload() });
+        return false;
+      }
+      // 转写动辄几十秒，不能阻塞消息通道，也不能挂在 popup 上——
+      // popup 一失焦就会被关掉，任务要留在页面里跑完。
+      generateSubtitleByWhisper();
+      sendResponse({ ok: true, payload: getPopupPayload() });
+      return false;
     }
 
     if (message.type === "popup-trigger-reading-view") {
@@ -1545,7 +1562,9 @@ function getPopupPayload() {
     srt: state.srt || "",
     txt: state.txt || "",
     downloadFormat: normalizeDownloadFormat(state.settings?.downloadFormat),
-    subtitleOptions
+    subtitleOptions,
+    canGenerate: canGenerateSubtitle(),
+    generating: Boolean(state.whisperGenerating)
   };
 }
 
@@ -1595,8 +1614,24 @@ async function downloadSubtitle() {
 /**
  * 视频没有字幕轨时，调用本机字幕助手服务生成字幕：
  * playurl 取音频 → whisper.cpp 转写 → 可选翻译 → 回填到与正常字幕一致的流程。
+ *
+ * 这层壳只负责"生成中"标记的同步置位：popup 提交完会立刻回来查状态，
+ * 标记必须在那之前就立起来，否则它会以为任务已经结束。
  */
 async function generateSubtitleByWhisper() {
+  if (state.whisperGenerating) {
+    return;
+  }
+  state.whisperGenerating = true;
+  try {
+    await runWhisperGeneration();
+  } finally {
+    state.whisperGenerating = false;
+    updateGenerateButtonVisibility();
+  }
+}
+
+async function runWhisperGeneration() {
   state.settings = await getSettings();
   const helperUrl = String(state.settings.whisperHelperUrl || "").trim();
   if (!helperUrl) {
@@ -1897,10 +1932,17 @@ function updateGenerateButtonVisibility() {
     }
     return;
   }
-  const enabled = state.settings?.enableWhisperFallback !== false;
-  const shouldShow =
-    enabled && state.subtitleFetchState === "empty" && Boolean(state.bvid) && Boolean(state.cid);
-  btn.hidden = !shouldShow;
+  btn.hidden = !canGenerateSubtitle();
+}
+
+// 是否具备"用 whisper 生成字幕"的条件（面板按钮和 popup 入口共用）
+function canGenerateSubtitle() {
+  return Boolean(
+    state.settings?.enableWhisperFallback !== false &&
+    state.subtitleFetchState === "empty" &&
+    state.bvid &&
+    state.cid
+  );
 }
 
 function cleanupReaderFloatingArtifacts(playerHost = state.readingPlayerHost) {
