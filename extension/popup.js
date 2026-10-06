@@ -448,10 +448,17 @@ function applyGenerationState(payload) {
   }
 
   if (el.whisperBtn) {
+    // 生成完成后 fetchState 从 empty 变成 ready，canGenerate 会变 false；
+    // 这里必须把"已经有生成的字幕"也算进去，否则按钮会在完成那一刻消失。
     const canGenerate = Boolean(payload?.canGenerate);
-    el.whisperBtn.hidden = !canGenerate && !generating;
+    const hasTrack = Boolean(payload?.whisperTrack);
+    el.whisperBtn.hidden = !(canGenerate || hasTrack || generating);
     el.whisperBtn.disabled = generating;
-    el.whisperBtn.textContent = generating ? "生成中…" : "生成字幕（whisper）";
+    el.whisperBtn.textContent = generating
+      ? "生成中…"
+      : hasTrack
+        ? "重新生成字幕"
+        : "生成字幕";
   }
 }
 
