@@ -34,10 +34,13 @@ body {
    * 宽度固定，高度交给内容——不写 vh/vw：弹窗尺寸由内容布局推导，
    * 用视口单位会形成循环依赖、解析成极小值，整个框塌掉。
    */
-  width: 320px;
-  min-width: 288px;
-  /* 背景交给 .popup：根节点铺满窗口的话，轮廓永远是直角 */
-  background: transparent;
+  width: 300px;
+  min-width: 272px;
+  /*
+   * 不能用 transparent：扩展弹窗的窗口底色是浏览器画的白色矩形，
+   * 透明会直接露出四个白角。这里填纯黑当作边框底色。
+   */
+  background: #000;
   color: var(--text);
   /* UI 用 SF Pro，跟系统一致；技术性内容另用等宽，靠字体对比建立层次 */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
@@ -48,12 +51,15 @@ body {
 
 .popup {
   box-sizing: border-box;
+  /* 窗口是方的，圆角只能画在面板上；靠描边让圆角看得出来 */
+  margin: 4px;
   background: var(--canvas);
-  border-radius: 18px;
-  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 15px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   overflow-y: auto;
 }
 
@@ -298,7 +304,7 @@ body {
 .preview-card {
   /* 固定高度：之前 flex:1 会把剩余空间全吃掉，弹窗白白被撑大 */
   flex: 0 0 auto;
-  height: 116px;
+  height: 96px;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);

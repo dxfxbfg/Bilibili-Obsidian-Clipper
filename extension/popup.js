@@ -209,8 +209,10 @@ function bindEvents() {
       if (!OUTPUT_MODE_VALUES.has(value)) {
         return;
       }
+      // 只记住选择，不要替用户开始生成——生成必须由按钮显式触发
       await sendToRuntime({ type: "save-settings", settings: { whisperOutputMode: value } });
-      await startWhisperGeneration(value);
+      latestPayload.whisperOutput = value;
+      applyGenerationState(latestPayload);
       return;
     }
 
@@ -386,16 +388,19 @@ function render(payload, { preserveStatus = false } = {}) {
   // 也继续放这几个选项，换一个就等于重新生成
   if (payload.canGenerate || payload.whisperTrack) {
     const current = String(payload.whisperOutput || "bilingual");
-    el.subtitleSelect.innerHTML = OUTPUT_MODES.map(
-      (item) =>
-        `<option value="${item.value}"${item.value === current ? " selected" : ""}>${item.label}</option>`
-    ).join("");
+    setHtml(
+      el.subtitleSelect,
+      OUTPUT_MODES.map(
+        (item) =>
+          `<option value="${item.value}"${item.value === current ? " selected" : ""}>${item.label}</option>`
+      ).join("")
+    );
     el.subtitleSelect.disabled = Boolean(payload.generating);
   } else if (options.length === 0) {
-    el.subtitleSelect.innerHTML = '<option value="">暂无字幕</option>';
+    setHtml(el.subtitleSelect, '<option value="">暂无字幕</option>');
     el.subtitleSelect.disabled = true;
   } else {
-    el.subtitleSelect.innerHTML = options
+    setHtml(el.subtitleSelect, options
       .map((item) => {
         const selected = item.selected ? "selected" : "";
         const aiTag = item.isAi ? " [AI]" : "";
@@ -405,11 +410,11 @@ function render(payload, { preserveStatus = false } = {}) {
           `${item.lang || "unknown"}${aiTag}`
         )}</option>`;
       })
-      .join("");
+      .join(""));
     el.subtitleSelect.disabled = false;
   }
 
-  el.preview.value = payload.subtitlePreview || "";
+  setValue(el.preview, payload.subtitlePreview || "");
   setText(el.previewCount, countPreviewLines(payload.subtitlePreview));
   applyGenerationState(payload);
 }
@@ -450,8 +455,40 @@ function applyGenerationState(payload) {
   }
 }
 
+/**
+ * 只在内容真的变了才写 DOM。
+ * 生成完成那一刻会把整份载荷重新过一遍，无脑赋值等于整块重绘，
+ * 视觉上就是闪一下；大部分字段其实没变。
+ */
 function setText(node, text) {
-  node.textContent = String(text || "");
+  if (!node) {
+    return;
+  }
+  const value = String(text ?? "");
+  if (node.textContent !== value) {
+    node.textContent = value;
+  }
+}
+
+function setValue(node, value) {
+  if (!node) {
+    return;
+  }
+  const next = String(value ?? "");
+  if (node.value !== next) {
+    node.value = next;
+  }
+}
+
+function setHtml(node, html) {
+  if (!node) {
+    return;
+  }
+  const next = String(html ?? "");
+  if (node.__bocHtml !== next) {
+    node.innerHTML = next;
+    node.__bocHtml = next;
+  }
 }
 
 /**
