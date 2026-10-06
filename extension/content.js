@@ -836,7 +836,7 @@ function bindUiEvents() {
 
   closeBtn.addEventListener("click", () => panel.classList.remove("open"));
   refreshBtn.addEventListener("click", refreshClip);
-  const generateBtn = byId(ids.generateBtn);
+  const generateBtn = byIdOptional(ids.generateBtn);
   if (generateBtn) {
     generateBtn.addEventListener("click", generateSubtitleByWhisper);
   }
@@ -1614,7 +1614,7 @@ async function generateSubtitleByWhisper() {
     ? normalizeWhisperOutputMode(state.settings.whisperOutputMode)
     : "original";
 
-  const btn = byId(ids.generateBtn);
+  const btn = byIdOptional(ids.generateBtn);
   setBusyState(true);
   if (btn) {
     btn.textContent = "生成中…";
@@ -1854,7 +1854,7 @@ function setBusyState(disabled) {
   byId(ids.sendBtn).disabled = disabled;
   byId(ids.refreshBtn).disabled = disabled;
   byId(ids.settingsBtn).disabled = disabled;
-  const generateBtn = byId(ids.generateBtn);
+  const generateBtn = byIdOptional(ids.generateBtn);
   if (generateBtn) {
     generateBtn.disabled = disabled;
   }
@@ -1887,8 +1887,14 @@ function applyNoSubtitleState() {
 
 // 视频没有字幕轨时，是否显示"生成字幕"入口
 function updateGenerateButtonVisibility() {
-  const btn = byId(ids.generateBtn);
+  const btn = byIdOptional(ids.generateBtn);
   if (!btn) {
+    // 面板存在却没有按钮，基本只有一个原因：同一页面装了本扩展的两个版本
+    // （商店版 + 本地加载版），互相同步 #boc-root 的 DOM。刷新页面即可，
+    // 同时建议在扩展管理页停用其中一个。
+    if (document.getElementById(ids.root)) {
+      logWarn("[BOC] 面板缺少生成字幕按钮，可能同时装了本扩展的多个版本，建议停用其中一个并刷新页面");
+    }
     return;
   }
   const enabled = state.settings?.enableWhisperFallback !== false;
@@ -4591,6 +4597,12 @@ function byId(id) {
     throw new Error(`Missing node: ${id}`);
   }
   return node;
+}
+
+// 取不到就返回 null。用于新增的可选节点：扩展刚重载、页面还挂着旧版
+// UI 时，缺节点不应该把整条抓取流程带崩。
+function byIdOptional(id) {
+  return document.getElementById(id) || null;
 }
 
 function extractBvid(url) {
