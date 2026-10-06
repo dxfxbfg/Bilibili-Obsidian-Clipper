@@ -5527,33 +5527,31 @@ function buildMarkdown(meta, body, settings) {
   }
   pushOptionalLines(lines, buildVideoBlock(meta, page, settings));
 
-  // 边看边记：笔记区紧跟视频。原来视频下面是整段字幕，笔记区被埋到最底下，
-  // 往下写的时候视频早滚出视野了。留空段落（默认"我的笔记"）也可以关掉。
+  // 所有段落统一为平铺的折叠 callout，谁也不包谁（用户明确要求）。
+  // 只有"我的笔记"默认展开——打开笔记就是要写，不想多点一下。
   const noteSectionTitle = String(
     settings.noteSectionTitle === undefined ? "我的笔记" : settings.noteSectionTitle
   ).trim();
   if (noteSectionTitle) {
-    lines.push(`## ${noteSectionTitle}`, "");
+    lines.push(...buildCallout(noteSectionTitle, [], false), "");
   }
 
   pushOptionalLines(lines, noteSections.before_intro);
 
   if (intro) {
-    lines.push("## 简介", "", intro, "");
+    lines.push(...buildCallout("简介", intro.split("\n")), "");
   }
 
   pushOptionalLines(lines, noteSections.before_chapters);
 
   if (chapterLines.length > 0) {
-    lines.push("## 章节", "", ...chapterLines, "");
+    lines.push(...buildCallout("章节", chapterLines), "");
   }
 
   pushOptionalLines(lines, noteSections.before_subtitle);
 
-  // 字幕默认折叠成 callout：展开才占版面，收起时只占一行
   if (settings.collapseSubtitleInNote !== false) {
-    lines.push("> [!quote]- 字幕（点击展开）");
-    lines.push(...subtitleSectionLines.map((line) => (line ? `> ${line}` : ">")));
+    lines.push(...buildCallout("字幕（点击展开）", subtitleSectionLines), "");
   } else {
     lines.push("## 字幕", "", ...subtitleSectionLines);
   }
@@ -5563,10 +5561,10 @@ function buildMarkdown(meta, body, settings) {
   );
   if (hotCommentLines.length > 0) {
     const commentCount = normalizeHotComments(meta?.hotComments || [], 20).length;
-    // 评论和字幕是同类"参考材料"，同样折叠——否则末尾又拖出一大段
     if (settings.collapseSubtitleInNote !== false) {
-      lines.push("", `> [!note]- 评论（${commentCount} 条 · 点击展开）`);
-      lines.push(...hotCommentLines.map((line) => (line ? `> ${line}` : ">")));
+      lines.push(...buildCallout(`评论（${commentCount} 条 · 点击展开）`, hotCommentLines, {
+        type: "note"
+      }), "");
     } else {
       lines.push("", "## 评论", "", ...hotCommentLines);
     }
@@ -5973,6 +5971,24 @@ function buildBilibiliEmbedIframe(meta, page = 1) {
  * 视频块。默认只放一行链接——嵌入播放器跑在 Obsidian 自己的 webview 里，
  * 拿不到 B 站登录态，画质被锁在 360p 左右，还不如点开在浏览器里看。
  */
+/**
+ * 把一段内容包成平铺的折叠 callout：
+ *   > [!type]- 标题
+ *   > 内容……（空行写成单独的 ">"）
+ * contentLines 为空时补一个空引用行，方便直接点进去写。
+ */
+function buildCallout(title, contentLines, { type = "quote", folded = true } = {}) {
+  const foldMark = folded ? "-" : "+";
+  const lines = [`> [!${type}]${foldMark} ${String(title || "").trim()}`];
+  const rows = Array.isArray(contentLines) ? contentLines : [];
+  if (rows.length === 0) {
+    lines.push("> ");
+    return lines;
+  }
+  rows.forEach((line) => lines.push(String(line).trim() ? `> ${line}` : ">"));
+  return lines;
+}
+
 function buildVideoBlock(meta, page, settings) {
   const mode = String(settings?.noteVideoMode || "none");
   if (mode === "none") {
