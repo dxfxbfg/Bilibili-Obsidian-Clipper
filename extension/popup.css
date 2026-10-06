@@ -36,7 +36,8 @@ body {
    */
   width: 320px;
   min-width: 288px;
-  background: var(--canvas);
+  /* 背景交给 .popup：根节点铺满窗口的话，轮廓永远是直角 */
+  background: transparent;
   color: var(--text);
   /* UI 用 SF Pro，跟系统一致；技术性内容另用等宽，靠字体对比建立层次 */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
@@ -47,6 +48,8 @@ body {
 
 .popup {
   box-sizing: border-box;
+  background: var(--canvas);
+  border-radius: 18px;
   padding: 11px;
   display: flex;
   flex-direction: column;
