@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。",
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
-  noteVideoMode: "link",
+  noteVideoMode: "none",
   collapseSubtitleInNote: true,
   enableDebugLogs: false,
   enableWhisperFallback: true,
@@ -5974,7 +5974,7 @@ function buildBilibiliEmbedIframe(meta, page = 1) {
  * 拿不到 B 站登录态，画质被锁在 360p 左右，还不如点开在浏览器里看。
  */
 function buildVideoBlock(meta, page, settings) {
-  const mode = String(settings?.noteVideoMode || "link");
+  const mode = String(settings?.noteVideoMode || "none");
   if (mode === "none") {
     return [];
   }

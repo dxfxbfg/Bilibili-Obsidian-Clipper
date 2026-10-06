@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
-  noteVideoMode: "link",
+  noteVideoMode: "none",
   collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
@@ -168,7 +168,7 @@ async function loadSettings() {
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
   elements.noteVideoMode.value = ["link", "embed", "none"].includes(settings.noteVideoMode)
     ? settings.noteVideoMode
-    : "link";
+    : "none";
   elements.noteSectionTitle.value =
     settings.noteSectionTitle === undefined ? "我的笔记" : String(settings.noteSectionTitle || "");
   elements.collapseSubtitleInNote.checked = settings.collapseSubtitleInNote !== false;
