@@ -36,7 +36,39 @@ init().catch((error) => {
 
 async function init() {
   bindEvents();
+
+  // 内容脚本如果已经抓过当前视频，先把结果直接画出来，不再白等一次
+  // 完整的网络往返（视频信息 + 字幕列表 + 字幕内容）。
+  const tab = await getActiveTab();
+  const cached = await sendToContent({ type: "popup-get-state" });
+  if (!cached?.ok) {
+    // 连不上内容脚本（不在 B 站视频页，或页面需要刷新）。
+    // sendToContent 已经把原因写到状态栏了，不必再用一次必然失败的抓取覆盖它。
+    render(cached?.payload || latestPayload, { preserveStatus: true });
+    return;
+  }
+  if (isSameVideo(cached.payload?.url, tab?.url) && hasUsableSubtitle(cached.payload)) {
+    render(cached.payload);
+    return;
+  }
+
   await refreshFromTab();
+}
+
+function hasUsableSubtitle(payload) {
+  return Boolean(
+    (payload?.subtitleOptions || []).length || String(payload?.subtitlePreview || "").trim()
+  );
+}
+
+function isSameVideo(a, b) {
+  const left = extractBvid(a);
+  return Boolean(left) && left === extractBvid(b);
+}
+
+function extractBvid(url) {
+  const match = String(url || "").match(/BV[0-9A-Za-z]{10}/);
+  return match ? match[0] : "";
 }
 
 function bindEvents() {

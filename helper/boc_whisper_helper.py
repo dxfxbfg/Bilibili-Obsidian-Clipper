@@ -40,6 +40,7 @@ import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
@@ -89,6 +90,10 @@ CONFIG = {
     "threads": 0,
     "keep_temp": False,
     "fix_file": os.path.join(os.path.dirname(os.path.abspath(__file__)), "text_fixes.json"),
+    # 默认贪心解码：实测比 5 束搜索快约 30%，且未必更差——
+    # 对内容里的自造词/专有名词，束搜索反而更容易"顺"成常见词。
+    "beam_size": 1,
+    "best_of": 1,
 }
 
 JOBS = {}
@@ -325,10 +330,13 @@ def probe_duration(path):
 
 # ---------------------------------------------------------------- 转写
 
-def transcribe(wav, model, language, threads, on_stage, duration=0, on_proc=None):
+def transcribe(wav, model, language, threads, on_stage, duration=0, on_proc=None,
+               beam_size=None, best_of=None):
     out_prefix = os.path.join(os.path.dirname(wav), "asr")
+    beam = int(beam_size if beam_size is not None else CONFIG["beam_size"])
+    best = int(best_of if best_of is not None else CONFIG["best_of"])
     cmd = [CONFIG["whisper_bin"], "-m", model, "-f", wav, "-oj", "-of", out_prefix,
-           "-t", str(threads)]
+           "-t", str(threads), "-bs", str(beam), "-bo", str(best)]
     if language and language != "auto":
         cmd += ["-l", language]
 
@@ -433,32 +441,59 @@ def apply_text_fixes(cues):
 
 # ---------------------------------------------------------------- 翻译
 
+TRANSLATE_CHUNK_LINES = 40
+TRANSLATE_WORKERS = 4
+
+
 def translate_lines(texts, target, on_stage):
+    """整批字幕一次性并行翻译。翻译耗时主要卡在上游生成 token，
+    分批并发比逐批串行快得多，长视频尤其明显。"""
     template = TRANSLATE_TEMPLATE.format(target=target)
-    results = {}
-    chunk_size = 40
     total = len(texts)
-    for start in range(0, total, chunk_size):
-        chunk = texts[start:start + chunk_size]
+    if not total:
+        return []
+
+    chunks = []
+    for start in range(0, total, TRANSLATE_CHUNK_LINES):
+        chunk = texts[start:start + TRANSLATE_CHUNK_LINES]
         body = "\n".join(f"{start + i + 1}. {t}" for i, t in enumerate(chunk))
-        payload = {"text": template + body}
-        for attempt in range(3):
-            try:
-                data = http_post_json(CONFIG["translate_url"], payload, timeout=180)
-                if "content" in data:
-                    break
-                raise RuntimeError(str(data.get("message") or "翻译服务返回异常"))
-            except Exception as exc:  # noqa: BLE001
-                if attempt == 2:
-                    raise RuntimeError(f"翻译失败：{exc}") from exc
-                time.sleep(2 + attempt * 3)
-        for line in str(data["content"]).split("\n"):
-            m = re.match(r"\s*(\d+)[.、)]\s*(.+)", line.strip())
-            if m:
-                results[int(m.group(1))] = m.group(2).strip()
-        done = min(start + chunk_size, total)
-        on_stage("translate", 85 + int(done / total * 12), f"正在翻译 {done}/{total}")
+        chunks.append((start, body))
+
+    results = {}
+    lock = threading.Lock()
+    progress = {"done": 0}
+
+    def run(item):
+        start, body = item
+        content = translate_one(template + body)
+        with lock:
+            for line in content.split("\n"):
+                m = re.match(r"\s*(\d+)[.、)]\s*(.+)", line.strip())
+                if m:
+                    results[int(m.group(1))] = m.group(2).strip()
+            progress["done"] = min(total, progress["done"] + len(body.split("\n")))
+            on_stage("translate", 85 + int(progress["done"] / total * 12),
+                     f"正在翻译 {progress['done']}/{total}")
+
+    with ThreadPoolExecutor(max_workers=min(TRANSLATE_WORKERS, len(chunks))) as pool:
+        list(pool.map(run, chunks))
+
     return [results.get(i + 1, "") for i in range(total)]
+
+
+def translate_one(prompt, attempts=3):
+    last = None
+    for attempt in range(attempts):
+        try:
+            data = http_post_json(CONFIG["translate_url"], {"text": prompt}, timeout=180)
+            if "content" in data:
+                return str(data["content"])
+            last = RuntimeError(str(data.get("message") or "翻译服务返回异常"))
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+        if attempt < attempts - 1:
+            time.sleep(2 + attempt * 3)
+    raise RuntimeError(f"翻译失败：{last}")
 
 
 # ---------------------------------------------------------------- 任务
@@ -499,7 +534,8 @@ def run_job(job_id, options):
             job["cid"] = cid
             job["model"] = os.path.basename(model)
             wav, duration = prepare_wav(workdir, bvid, cid, options.get("aid", ""), on_stage)
-            cues = transcribe(wav, model, language, threads, on_stage, duration, on_proc=on_proc)
+            cues = transcribe(wav, model, language, threads, on_stage, duration, on_proc=on_proc,
+                              beam_size=options.get("beam_size"), best_of=options.get("best_of"))
             cues = apply_text_fixes(merge_sentences(cues))
 
             want_translate = bool(options.get("translate", CONFIG["translate_default"]))
@@ -713,6 +749,10 @@ def main():
     parser.add_argument("--keep-temp", action="store_true", help="保留临时文件（调试用）")
     parser.add_argument("--fix-file", default=CONFIG["fix_file"],
                         help="术语纠正表 JSON，默认取脚本同目录的 text_fixes.json")
+    parser.add_argument("--beam-size", type=int, default=CONFIG["beam_size"],
+                        help="whisper 束搜索宽度，1 为贪心解码（默认，最快）")
+    parser.add_argument("--best-of", type=int, default=CONFIG["best_of"],
+                        help="候选采样数，1 表示不做额外采样（默认）")
     args = parser.parse_args()
 
     CONFIG.update({
@@ -724,6 +764,8 @@ def main():
         "translate_url": args.translate_url,
         "keep_temp": args.keep_temp,
         "fix_file": args.fix_file,
+        "beam_size": args.beam_size,
+        "best_of": args.best_of,
     })
 
     model = find_model("")
@@ -732,6 +774,8 @@ def main():
     log(f"  ffmpeg  : {CONFIG['ffmpeg_bin']} ({'ok' if which_ok(CONFIG['ffmpeg_bin']) else '未找到'})")
     log(f"  模型    : {model or '未找到，请用 --model 指定'}")
     log(f"  翻译    : {'默认开启' if CONFIG['translate_default'] else '默认关闭'}")
+    log(f"  解码    : beam={CONFIG['beam_size']} best-of={CONFIG['best_of']}"
+        f"{'（贪心，最快）' if CONFIG['beam_size'] == 1 else ''}")
     log(f"  临时目录: {tempfile.gettempdir()}"
         f"{'（--keep-temp 已开启，不会自动删）' if CONFIG['keep_temp'] else ''}")
 

@@ -1,249 +1,282 @@
 :root {
-  --popup-bg: #f7f7f8;
-  --panel-bg: #ffffff;
-  --panel-border: #cfd7e6;
-  --button-bg: #ffffff;
-  --button-border: #cfd7e6;
-  --button-text: #4b556b;
-  --status-bg: #f2fbf5;
-  --status-border: #b9e7c7;
-  --status-text: #34a96b;
-  --status-error-bg: #fdf1f1;
-  --status-error-border: #efc2c2;
-  --status-error-text: #d35f5f;
-  --action-accent: rgb(138, 112, 245);
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --border: #e7e7ee;
+  --border-strong: #dcdce6;
+  --text: #1f2024;
+  --text-muted: #75757f;
+  --text-faint: #9a9aa4;
+  --accent: #6b5bd2;
+  --accent-soft: #f1eefc;
+  --accent-line: #cfc6f5;
+  --ok-bg: #f1f9f3;
+  --ok-border: #d5ebdc;
+  --ok-text: #2f7d4f;
+  --err-bg: #fdf3f3;
+  --err-border: #f1d4d3;
+  --err-text: #b3413f;
+  --radius: 10px;
+  --radius-sm: 8px;
 }
 
 html,
 body {
   margin: 0;
   padding: 0;
-  width: 360px;
-  height: 540px;
-  background: var(--popup-bg);
-  color: #2f2f2f;
+  /* 屏幕矮的时候跟着收，别把底部的按钮挤出去 */
+  width: min(380px, 100vw);
+  height: min(560px, 100vh);
+  background: var(--bg);
+  color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
     Arial, sans-serif;
-  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 .popup {
   height: 100%;
   box-sizing: border-box;
-  padding: 8px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  overflow: hidden;
+  gap: 10px;
+  /* 兜底：再矮也只是滚动，不会把内容截掉 */
+  overflow-y: auto;
 }
 
 .top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.top strong {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .top-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-
-.top strong {
-  font-size: 19px;
-  font-weight: 600;
+  gap: 6px;
 }
 
 .ghost {
-  height: 28px;
-  min-width: 58px;
-  border: 1px solid var(--button-border);
-  border-radius: 8px;
-  background: var(--button-bg);
-  color: var(--button-text);
+  height: 26px;
+  min-width: 52px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.ghost:hover {
+  background: #fafafc;
+  border-color: var(--accent-line);
+  color: var(--accent);
 }
 
 .ghost-ai {
-  border-color: rgba(138, 112, 245, 0.34);
-  background: linear-gradient(180deg, #f3efff 0%, #ece6ff 100%);
-  color: rgb(138, 112, 245);
-  font-weight: 700;
-  box-shadow: 0 1px 0 rgba(138, 112, 245, 0.08);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
   gap: 4px;
 }
 
 .ghost-ai:hover {
-  background: linear-gradient(180deg, #ede7ff 0%, #e4dcff 100%);
+  background: #e9e5fa;
 }
 
 .ghost-ai svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   fill: currentColor;
   flex: 0 0 auto;
 }
 
 .status {
   margin: 0;
+  flex: 0 0 auto;
   font-size: 12px;
-  color: var(--status-text);
-  background: var(--status-bg);
-  border: 1px solid var(--status-border);
-  border-radius: 8px;
-  padding: 7px 8px;
+  color: var(--ok-text);
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
   white-space: normal;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
 .status.is-error {
-  color: var(--status-error-text);
-  background: var(--status-error-bg);
-  border-color: var(--status-error-border);
+  color: var(--err-text);
+  background: var(--err-bg);
+  border-color: var(--err-border);
 }
 
-.section-title {
-  font-size: 11.9px;
+.section-title,
+.label {
+  flex: 0 0 auto;
+  font-size: 11px;
   font-weight: 600;
+  color: var(--text-faint);
+  letter-spacing: 0.6px;
   white-space: nowrap;
 }
 
 .props {
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  background: var(--panel-bg);
-  padding: 7px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 9px 10px;
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 
 .prop-row {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
 }
 
 .k {
-  font-size: 12px;
-  color: #666;
+  font-size: 11.5px;
+  color: var(--text-faint);
   white-space: nowrap;
 }
 
 .v {
   font-size: 12px;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.label {
-  font-size: 11.9px;
-  font-weight: 600;
-  color: #4d4d4d;
-  white-space: nowrap;
-}
-
 #subtitleSelect {
+  flex: 0 0 auto;
   height: 32px;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 0 8px;
-  background: var(--panel-bg);
-  color: #2d2d2d;
-  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
 }
 
-#subtitleSelect option {
-  font-size: 13px;
+#subtitleSelect:disabled {
+  background: #fafafc;
+  color: var(--text-faint);
 }
 
 #preview {
   width: 100%;
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 96px;
   box-sizing: border-box;
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
   resize: none;
   font-size: 12px;
-  line-height: 1.5;
-  background: var(--panel-bg);
-  color: #2f2f2f;
+  line-height: 1.6;
+  background: var(--surface);
+  color: var(--text);
   overflow: auto;
   white-space: pre;
   font-family: "SF Mono", "JetBrains Mono", "PingFang SC", Menlo, Monaco, Consolas, monospace;
 }
 
 .actions {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
 .actions button {
-  border: 1px solid var(--action-accent);
-  background: var(--button-bg);
-  border-radius: 8px;
-  padding: 7px 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--action-accent);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.actions button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--accent);
+  background: #fafaff;
 }
 
 .whisper {
+  flex: 0 0 auto;
   width: 100%;
-  border: 1px dashed var(--action-accent);
-  background: var(--button-bg);
-  border-radius: 8px;
-  padding: 8px 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--action-accent);
+  border: 1px dashed var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 9px 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
   cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.whisper:hover:not(:disabled) {
+  background: #e9e5fa;
 }
 
 .whisper[hidden] {
   display: none;
 }
 
-.whisper[disabled] {
-  opacity: 0.65;
-  cursor: default;
-}
-
 .send {
-  border: 1px solid #a88fff;
-  background: linear-gradient(180deg, #9c82ff 0%, #8f75ef 100%);
-  border-radius: 9px;
-  padding: 8px 0;
-  font-size: 14px;
-  font-weight: 600;
+  flex: 0 0 auto;
+  border: none;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 9px 0;
+  font-size: 13px;
+  font-weight: 500;
   color: #fff;
   cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.send:hover:not(:disabled) {
+  background: #5c4cc0;
 }
 
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .message {
   margin: 0;
-  font-size: 12px;
-  color: #0f766e;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
   white-space: normal;
-  line-height: 1.35;
-  overflow: visible;
+  line-height: 1.45;
 }
 
 .message:empty {

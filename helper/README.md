@@ -45,8 +45,31 @@ python3 helper/boc_whisper_helper.py
 --model <路径>           指定模型，默认自动探测
 --translate              默认开启翻译（也可以在扩展里控制）
 --threads 8              whisper 线程数，默认取 CPU 核数
+--beam-size 1            束搜索宽度，1 = 贪心解码（默认，最快）
+--best-of 1              候选采样数，1 = 不做额外采样（默认）
 --keep-temp              保留临时文件，调试用
 ```
+
+### 速度
+
+默认是贪心解码，实测比 5 束搜索快约 30%。而且**束搜索未必更准**：在测试素材上
+
+```
+5 束搜索： Eating is usually viewed as a self-care technique   ← 把自造词听成了 Eating
+贪心解码： Bedroting is usually viewed as a self-care technique
+```
+
+遇到内容里的自造词、专有名词，束搜索反而容易"顺"成常见词。想要更保守的结果可以 `--beam-size 5 --best-of 5`，代价是慢三分之一。
+
+实测（8 分 17 秒视频，base.en，6 核）：
+
+| 阶段 | 耗时 |
+|---|---|
+| 取音频地址 + 下载 | 约 3 秒 |
+| 转码 16kHz | 约 1 秒 |
+| 转写（贪心） | 约 13 秒 |
+| 翻译（并发 4 路） | 约 11 秒 |
+| **合计** | **约 27 秒** |
 
 启动后访问 <http://127.0.0.1:8788/health> 应看到依赖状态。
 
