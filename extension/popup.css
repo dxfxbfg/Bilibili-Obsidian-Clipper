@@ -23,9 +23,15 @@ html,
 body {
   margin: 0;
   padding: 0;
-  /* 屏幕矮的时候跟着收，别把底部的按钮挤出去 */
-  width: min(380px, 100vw);
-  height: min(560px, 100vh);
+  /*
+   * 弹窗尺寸由内容布局决定，所以这里不能用 vw/vh：那会形成循环依赖，
+   * 解析成一个极小的值，整个框会塌掉。写固定尺寸 + 下限，屏幕放不下时
+   * 交给浏览器去夹，容器再滚动兜底。
+   */
+  width: 380px;
+  min-width: 340px;
+  height: 540px;
+  min-height: 440px;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
@@ -35,13 +41,31 @@ body {
 
 .popup {
   height: 100%;
+  min-height: 440px;
   box-sizing: border-box;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* 兜底：再矮也只是滚动，不会把内容截掉 */
+  /* 兜底：被浏览器夹矮时滚动，不会把底部按钮截掉 */
   overflow-y: auto;
+}
+
+/* 屏幕矮的时候收一收留白，优先保证按钮和预览区都在 */
+@media (max-height: 520px) {
+  .popup {
+    padding: 9px;
+    gap: 7px;
+  }
+
+  #preview {
+    min-height: 60px;
+  }
+
+  .props {
+    padding: 7px 9px;
+    gap: 4px;
+  }
 }
 
 .top {
