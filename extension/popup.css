@@ -31,13 +31,11 @@ body {
   margin: 0;
   padding: 0;
   /*
-   * 弹窗尺寸由内容决定，不能用 vw/vh：那会形成循环依赖、解析成极小值，
-   * 整个框会塌掉。固定尺寸 + 下限，放不下交给浏览器夹、容器滚动兜底。
+   * 宽度固定，高度交给内容——不写 vh/vw：弹窗尺寸由内容布局推导，
+   * 用视口单位会形成循环依赖、解析成极小值，整个框塌掉。
    */
   width: 320px;
   min-width: 288px;
-  height: 440px;
-  min-height: 372px;
   background: var(--canvas);
   color: var(--text);
   /* UI 用 SF Pro，跟系统一致；技术性内容另用等宽，靠字体对比建立层次 */
@@ -48,8 +46,6 @@ body {
 }
 
 .popup {
-  height: 100%;
-  min-height: 372px;
   box-sizing: border-box;
   padding: 11px;
   display: flex;
@@ -297,9 +293,9 @@ body {
 /* ---------- 预览 ---------- */
 
 .preview-card {
-  /* basis 归零，剩余空间才分得准；auto 会多占几个像素导致溢出 */
-  flex: 1 1 0;
-  min-height: 72px;
+  /* 固定高度：之前 flex:1 会把剩余空间全吃掉，弹窗白白被撑大 */
+  flex: 0 0 auto;
+  height: 116px;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -454,14 +450,4 @@ button:disabled {
   display: none;
 }
 
-/* 屏幕矮的时候收紧留白，优先保证按钮可见 */
-@media (max-height: 460px) {
-  .popup {
-    padding: 10px;
-    gap: 8px;
-  }
 
-  .preview-card {
-    min-height: 56px;
-  }
-}
