@@ -11,7 +11,6 @@ const DEFAULT_SETTINGS = {
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
   noteVideoMode: "none",
-  collapseSubtitleInNote: true,
   enableDebugLogs: false,
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
@@ -5527,47 +5526,37 @@ function buildMarkdown(meta, body, settings) {
   }
   pushOptionalLines(lines, buildVideoBlock(meta, page, settings));
 
-  // 所有段落统一为平铺的折叠 callout，谁也不包谁（用户明确要求）。
-  // 只有"我的笔记"默认展开——打开笔记就是要写，不想多点一下。
+  // 段落全部用标题，不用 callout：callout 在编辑模式（Live Preview）里
+  // 没有折叠按钮、在里面打字每行都带 "> " 前缀，两个都是硬伤。
+  // 标题在两种模式下都能折叠（编辑模式走侧边箭头，阅读视图 1.14+ 原生支持）。
   const noteSectionTitle = String(
     settings.noteSectionTitle === undefined ? "我的笔记" : settings.noteSectionTitle
   ).trim();
   if (noteSectionTitle) {
-    lines.push(...buildCallout(noteSectionTitle, [], false), "");
+    lines.push(`## ${noteSectionTitle}`, "");
   }
 
   pushOptionalLines(lines, noteSections.before_intro);
 
   if (intro) {
-    lines.push(...buildCallout("简介", intro.split("\n")), "");
+    lines.push("## 简介", "", intro, "");
   }
 
   pushOptionalLines(lines, noteSections.before_chapters);
 
   if (chapterLines.length > 0) {
-    lines.push(...buildCallout("章节", chapterLines), "");
+    lines.push("## 章节", "", ...chapterLines, "");
   }
 
   pushOptionalLines(lines, noteSections.before_subtitle);
 
-  if (settings.collapseSubtitleInNote !== false) {
-    lines.push(...buildCallout("字幕（点击展开）", subtitleSectionLines), "");
-  } else {
-    lines.push("## 字幕", "", ...subtitleSectionLines);
-  }
+  lines.push("## 字幕", "", ...subtitleSectionLines);
 
   const hotCommentLines = buildHotCommentLines(
     settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
   );
   if (hotCommentLines.length > 0) {
-    const commentCount = normalizeHotComments(meta?.hotComments || [], 20).length;
-    if (settings.collapseSubtitleInNote !== false) {
-      lines.push(...buildCallout(`评论（${commentCount} 条 · 点击展开）`, hotCommentLines, {
-        type: "note"
-      }), "");
-    } else {
-      lines.push("", "## 评论", "", ...hotCommentLines);
-    }
+    lines.push("", "## 评论", "", ...hotCommentLines);
   }
 
   return lines.join("\n");
@@ -5971,24 +5960,6 @@ function buildBilibiliEmbedIframe(meta, page = 1) {
  * 视频块。默认只放一行链接——嵌入播放器跑在 Obsidian 自己的 webview 里，
  * 拿不到 B 站登录态，画质被锁在 360p 左右，还不如点开在浏览器里看。
  */
-/**
- * 把一段内容包成平铺的折叠 callout：
- *   > [!type]- 标题
- *   > 内容……（空行写成单独的 ">"）
- * contentLines 为空时补一个空引用行，方便直接点进去写。
- */
-function buildCallout(title, contentLines, { type = "quote", folded = true } = {}) {
-  const foldMark = folded ? "-" : "+";
-  const lines = [`> [!${type}]${foldMark} ${String(title || "").trim()}`];
-  const rows = Array.isArray(contentLines) ? contentLines : [];
-  if (rows.length === 0) {
-    lines.push("> ");
-    return lines;
-  }
-  rows.forEach((line) => lines.push(String(line).trim() ? `> ${line}` : ">"));
-  return lines;
-}
-
 function buildVideoBlock(meta, page, settings) {
   const mode = String(settings?.noteVideoMode || "none");
   if (mode === "none") {

@@ -41,7 +41,6 @@ const DEFAULT_SYNC_SETTINGS = {
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
   noteVideoMode: "none",
-  collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
   popupShowDownload: true,

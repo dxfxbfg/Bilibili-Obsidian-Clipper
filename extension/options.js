@@ -40,7 +40,6 @@ const DEFAULT_SETTINGS = {
   includeTimestampInBody: true,
   noteSectionTitle: "我的笔记",
   noteVideoMode: "none",
-  collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
   popupShowDownload: true,
@@ -102,7 +101,6 @@ const elements = {
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
   noteVideoMode: document.getElementById("noteVideoMode"),
   noteSectionTitle: document.getElementById("noteSectionTitle"),
-  collapseSubtitleInNote: document.getElementById("collapseSubtitleInNote"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
   popupShowCopy: document.getElementById("popupShowCopy"),
   popupShowDownload: document.getElementById("popupShowDownload"),
@@ -171,7 +169,6 @@ async function loadSettings() {
     : "none";
   elements.noteSectionTitle.value =
     settings.noteSectionTitle === undefined ? "我的笔记" : String(settings.noteSectionTitle || "");
-  elements.collapseSubtitleInNote.checked = settings.collapseSubtitleInNote !== false;
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
   elements.popupShowCopy.checked = settings.popupShowCopy !== false;
   elements.popupShowDownload.checked = settings.popupShowDownload !== false;
@@ -299,7 +296,6 @@ function collectFormPayload() {
     includeTimestampInBody: elements.includeTimestampInBody.checked,
     noteVideoMode: elements.noteVideoMode.value,
     noteSectionTitle: String(elements.noteSectionTitle.value || "").trim(),
-    collapseSubtitleInNote: elements.collapseSubtitleInNote.checked,
     enableDebugLogs: elements.enableDebugLogs.checked,
     popupShowCopy: elements.popupShowCopy.checked,
     popupShowDownload: elements.popupShowDownload.checked,
