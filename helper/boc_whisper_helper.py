@@ -85,7 +85,7 @@ CONFIG = {
     "whisper_bin": "whisper-cli",
     "ffmpeg_bin": "ffmpeg",
     "model": "",
-    "translate_default": False,
+    "default_output": "bilingual",
     "translate_url": TRANSLATE_URL,
     "threads": 0,
     "keep_temp": False,
@@ -169,15 +169,15 @@ CACHE_MAX = 5
 
 def build_cache_key(options):
     model = find_model(options.get("model", ""))
-    translate = bool(options.get("translate", CONFIG["translate_default"]))
-    output = str(options.get("output") or ("bilingual" if translate else "original"))
+    output = str(options.get("output") or CONFIG["default_output"])
+    target = str(options.get("target") or "zh")
     return "|".join([
         str(options.get("bvid") or ""),
         str(options.get("cid") or ""),
         str(options.get("language") or "en"),
         os.path.basename(model),
-        "1" if translate else "0",
         output,
+        target,
         str(options.get("beam_size") or CONFIG["beam_size"]),
     ])
 
@@ -592,11 +592,13 @@ def run_job(job_id, options):
                               beam_size=options.get("beam_size"), best_of=options.get("best_of"))
             cues = apply_text_fixes(merge_sentences(cues))
 
-            want_translate = bool(options.get("translate", CONFIG["translate_default"]))
-            output = str(options.get("output") or ("bilingual" if want_translate else "original"))
-            target = str(options.get("translate_target") or "zh")
+            # 语言即需求：output 不是 original 就要译文。
+            # 源语言与目标语言相同时没必要翻（比如中文视频要中文字幕）。
+            output = str(options.get("output") or CONFIG["default_output"])
+            target = str(options.get("target") or "zh")
+            want_translate = output in ("bilingual", "translated") and language != target
 
-            if want_translate or output == "translated":
+            if want_translate:
                 on_stage("translate", 85, "正在翻译字幕")
                 zh = translate_lines([c["text"] for c in cues], target, on_stage)
             else:
@@ -733,7 +735,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ffmpeg": which_ok(CONFIG["ffmpeg_bin"]),
                 "model": model,
                 "model_found": bool(model),
-                "translate_default": CONFIG["translate_default"],
+                "default_output": CONFIG["default_output"],
                 "jobs": len(JOBS),
                 "running_jobs": sum(1 for j in JOBS.values() if j.get("status") == "running"),
                 "temp_dirs": len(ACTIVE_WORKDIRS),
@@ -827,7 +829,9 @@ def main():
     parser.add_argument("--ffmpeg-bin", default="ffmpeg")
     parser.add_argument("--threads", type=int, default=0, help="whisper 线程数，0 为自动")
     parser.add_argument("--translate-url", default=TRANSLATE_URL)
-    parser.add_argument("--translate", action="store_true", help="默认开启翻译")
+    parser.add_argument("--output", default=CONFIG["default_output"],
+                        choices=["bilingual", "translated", "original"],
+                        help="默认输出：中英对照 / 仅译文 / 仅原文")
     parser.add_argument("--keep-temp", action="store_true", help="保留临时文件（调试用）")
     parser.add_argument("--fix-file", default=CONFIG["fix_file"],
                         help="术语纠正表 JSON，默认取脚本同目录的 text_fixes.json")
@@ -842,7 +846,7 @@ def main():
         "ffmpeg_bin": args.ffmpeg_bin,
         "model": args.model,
         "threads": args.threads,
-        "translate_default": args.translate,
+        "default_output": args.output,
         "translate_url": args.translate_url,
         "keep_temp": args.keep_temp,
         "fix_file": args.fix_file,
@@ -855,7 +859,7 @@ def main():
     log(f"  whisper : {CONFIG['whisper_bin']} ({'ok' if which_ok(CONFIG['whisper_bin']) else '未找到'})")
     log(f"  ffmpeg  : {CONFIG['ffmpeg_bin']} ({'ok' if which_ok(CONFIG['ffmpeg_bin']) else '未找到'})")
     log(f"  模型    : {model or '未找到，请用 --model 指定'}")
-    log(f"  翻译    : {'默认开启' if CONFIG['translate_default'] else '默认关闭'}")
+    log(f"  输出语言: {CONFIG['default_output']}")
     log(f"  解码    : beam={CONFIG['beam_size']} best-of={CONFIG['best_of']}"
         f"{'（贪心，最快）' if CONFIG['beam_size'] == 1 else ''}")
     log(f"  临时目录: {tempfile.gettempdir()}"

@@ -12,7 +12,6 @@ const DEFAULT_SETTINGS = {
   enableDebugLogs: false,
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
-  whisperAutoTranslate: false,
   whisperOutputMode: "bilingual",
   whisperLanguage: "en",
   whisperModel: "",
@@ -39,7 +38,7 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.5";
+const BOC_VERSION = "1.1.6";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 const state = {
@@ -65,6 +64,7 @@ const state = {
   subtitleFetchState: "idle",
   whisperGenerating: false,
   whisperProgress: 0,
+  whisperOutput: "",
   chapters: [],
   hotComments: [],
   markdown: "",
@@ -539,13 +539,14 @@ function bindRuntimeEvents() {
         sendResponse({ ok: true, payload: getPopupPayload() });
         return false;
       }
-      if (!canGenerateSubtitle()) {
+      const hasGenerated = (state.subtitles || []).some((item) => item?.generated);
+      if (!canGenerateSubtitle() && !hasGenerated) {
         sendResponse({ ok: false, error: "当前视频不满足生成条件", payload: getPopupPayload() });
         return false;
       }
       // 转写动辄几十秒，不能阻塞消息通道，也不能挂在 popup 上——
       // popup 一失焦就会被关掉，任务要留在页面里跑完。
-      generateSubtitleByWhisper();
+      generateSubtitleByWhisper(message.output);
       sendResponse({ ok: true, payload: getPopupPayload() });
       return false;
     }
@@ -1571,7 +1572,9 @@ function getPopupPayload() {
     subtitleOptions,
     canGenerate: canGenerateSubtitle(),
     generating: Boolean(state.whisperGenerating),
-    progress: state.whisperGenerating ? Number(state.whisperProgress) || 0 : 0
+    progress: state.whisperGenerating ? Number(state.whisperProgress) || 0 : 0,
+    whisperOutput: normalizeWhisperOutputMode(state.whisperOutput || state.settings?.whisperOutputMode),
+    whisperTrack: (state.subtitles || []).some((item) => item?.generated)
   };
 }
 
@@ -1625,21 +1628,21 @@ async function downloadSubtitle() {
  * 这层壳只负责"生成中"标记的同步置位：popup 提交完会立刻回来查状态，
  * 标记必须在那之前就立起来，否则它会以为任务已经结束。
  */
-async function generateSubtitleByWhisper() {
+async function generateSubtitleByWhisper(outputOverride) {
   if (state.whisperGenerating) {
     return;
   }
   state.whisperGenerating = true;
   state.whisperProgress = 0;
   try {
-    await runWhisperGeneration();
+    await runWhisperGeneration(outputOverride);
   } finally {
     state.whisperGenerating = false;
     updateGenerateButtonVisibility();
   }
 }
 
-async function runWhisperGeneration() {
+async function runWhisperGeneration(outputOverride) {
   state.settings = await getSettings();
   const helperUrl = String(state.settings.whisperHelperUrl || "").trim();
   if (!helperUrl) {
@@ -1652,10 +1655,9 @@ async function runWhisperGeneration() {
     return;
   }
 
-  const autoTranslate = Boolean(state.settings.whisperAutoTranslate);
-  const output = autoTranslate
-    ? normalizeWhisperOutputMode(state.settings.whisperOutputMode)
-    : "original";
+  // 输出语言即需求：要中文就得翻译，不存在单独的"翻译开关"
+  const output = normalizeWhisperOutputMode(outputOverride || state.settings.whisperOutputMode);
+  state.whisperOutput = output;
 
   const btn = byIdOptional(ids.generateBtn);
   setBusyState(true);
@@ -1678,7 +1680,6 @@ async function runWhisperGeneration() {
         aid: state.aid || "",
         language: String(state.settings.whisperLanguage || "en"),
         model: String(state.settings.whisperModel || ""),
-        translate: autoTranslate,
         output
       }
     });
@@ -1726,7 +1727,7 @@ async function runWhisperGeneration() {
       throw new Error("生成结果为空");
     }
 
-    const label = autoTranslate ? "whisper 生成 · 含译文" : "whisper 生成 · 原文";
+    const label = output === "original" ? "whisper 生成 · 原文" : `whisper 生成 · ${outputLabelText(output)}`;
     state.subtitleBody = cues;
     state.subtitles = [
       { id: "whisper-generated", lan: "whisper", lanDoc: label, subtitleUrl: "", source: "whisper", generated: true }
@@ -1763,13 +1764,8 @@ async function runWhisperGeneration() {
       sendRuntimeMessage({ type: "whisper-job-delete", helperUrl, jobId }).catch(() => {});
     }
   } finally {
-    if (btn) {
-      btn.textContent = "生成字幕（whisper）";
-    }
     setBusyState(false);
-    if (!finished) {
-      updateGenerateButtonVisibility();
-    }
+    updateGenerateButtonVisibility();
   }
 }
 
@@ -1778,6 +1774,16 @@ function normalizeWhisperOutputMode(value) {
     return value;
   }
   return "bilingual";
+}
+
+function outputLabelText(value) {
+  if (value === "translated") {
+    return "仅中文";
+  }
+  if (value === "original") {
+    return "原文";
+  }
+  return "中英对照";
 }
 
 async function sendToObsidian() {
@@ -1929,7 +1935,7 @@ function applyNoSubtitleState() {
   updateGenerateButtonVisibility();
 }
 
-// 视频没有字幕轨时，是否显示"生成字幕"入口
+// 视频没有字幕轨（或已生成过）时，是否显示"生成字幕"入口
 function updateGenerateButtonVisibility() {
   const btn = byIdOptional(ids.generateBtn);
   if (!btn) {
@@ -1941,7 +1947,9 @@ function updateGenerateButtonVisibility() {
     }
     return;
   }
-  btn.hidden = !canGenerateSubtitle();
+  const hasGenerated = (state.subtitles || []).some((item) => item?.generated);
+  btn.hidden = !(canGenerateSubtitle() || hasGenerated);
+  btn.textContent = hasGenerated ? "重新生成字幕" : "生成字幕（whisper）";
 }
 
 // 是否具备"用 whisper 生成字幕"的条件（面板按钮和 popup 入口共用）

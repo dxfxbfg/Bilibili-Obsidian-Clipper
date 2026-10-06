@@ -94,19 +94,15 @@
         <label for="whisperHelperUrl">字幕助手地址</label>
         <input id="whisperHelperUrl" type="text" placeholder="例如：http://127.0.0.1:8788" />
 
-        <label class="checkbox">
-          <input id="whisperAutoTranslate" type="checkbox" />
-          生成后自动翻译成中文
-        </label>
-
-        <label for="whisperOutputMode">字幕输出形式</label>
+        <label for="whisperOutputMode">默认输出语言</label>
         <select id="whisperOutputMode">
-          <option value="bilingual">中英对照（译文在上）</option>
-          <option value="translated">仅译文</option>
+          <option value="bilingual">中英对照</option>
+          <option value="translated">仅中文（自动翻译）</option>
           <option value="original">仅原文</option>
         </select>
+        <p class="hint inline-hint">在视频页的「语言」里随时可改；选了中文就会自动翻译，没有单独的翻译开关。</p>
 
-        <label for="whisperLanguage">音频语言</label>
+        <label for="whisperLanguage">源语言（音频）</label>
         <select id="whisperLanguage">
           <option value="en">英语 en</option>
           <option value="auto">自动检测（需多语言模型）</option>

@@ -41,7 +41,6 @@ const DEFAULT_SETTINGS = {
   enableDebugLogs: false,
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
-  whisperAutoTranslate: false,
   whisperOutputMode: "bilingual",
   whisperLanguage: "en",
   whisperModel: "",
@@ -96,7 +95,6 @@ const elements = {
   enableDebugLogs: document.getElementById("enableDebugLogs"),
   enableWhisperFallback: document.getElementById("enableWhisperFallback"),
   whisperHelperUrl: document.getElementById("whisperHelperUrl"),
-  whisperAutoTranslate: document.getElementById("whisperAutoTranslate"),
   whisperOutputMode: document.getElementById("whisperOutputMode"),
   whisperLanguage: document.getElementById("whisperLanguage"),
   whisperModel: document.getElementById("whisperModel"),
@@ -155,7 +153,6 @@ async function loadSettings() {
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
   elements.enableWhisperFallback.checked = settings.enableWhisperFallback !== false;
   elements.whisperHelperUrl.value = settings.whisperHelperUrl || DEFAULT_SETTINGS.whisperHelperUrl;
-  elements.whisperAutoTranslate.checked = Boolean(settings.whisperAutoTranslate);
   elements.whisperOutputMode.value = normalizeWhisperOutputMode(settings.whisperOutputMode);
   elements.whisperLanguage.value = String(settings.whisperLanguage || "en");
   elements.whisperModel.value = String(settings.whisperModel || "");
@@ -276,7 +273,6 @@ function collectFormPayload() {
     enableDebugLogs: elements.enableDebugLogs.checked,
     enableWhisperFallback: elements.enableWhisperFallback.checked,
     whisperHelperUrl: normalizeHelperUrl(elements.whisperHelperUrl.value),
-    whisperAutoTranslate: elements.whisperAutoTranslate.checked,
     whisperOutputMode: normalizeWhisperOutputMode(elements.whisperOutputMode.value),
     whisperLanguage: String(elements.whisperLanguage.value || "en"),
     whisperModel: String(elements.whisperModel.value || "").trim(),

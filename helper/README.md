@@ -43,7 +43,7 @@ python3 helper/boc_whisper_helper.py
 ```
 --port 8788              监听端口，默认 8788
 --model <路径>           指定模型，默认自动探测
---translate              默认开启翻译（也可以在扩展里控制）
+--output bilingual       默认输出：bilingual / translated / original
 --threads 8              whisper 线程数，默认取 CPU 核数
 --beam-size 1            束搜索宽度，1 = 贪心解码（默认，最快）
 --best-of 1              候选采样数，1 = 不做额外采样（默认）
@@ -68,8 +68,8 @@ python3 helper/boc_whisper_helper.py
 | 取音频地址 + 下载 | 约 3 秒 |
 | 转码 16kHz | 约 1 秒 |
 | 转写（贪心） | 约 13 秒 |
-| 翻译（并发 4 路均分） | 约 5 秒 |
-| **合计** | **约 21 秒** |
+| 翻译（并发 4 路均分） | 5–20 秒，看免费代理的波动 |
+| **合计** | **约 21–35 秒** |
 
 同一个视频 + 同一套参数再生成一次会直接命中缓存（结果保留 30 分钟、最多 5 份），秒回。改了模型、语言、翻译开关或输出形式都会重新转写。
 
@@ -118,15 +118,16 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.boc.whisper-helper.p
   "bvid": "BV17XVtzZEHn",
   "cid": "29830284611",
   "language": "en",
-  "translate": true,
   "output": "bilingual"
 }
 ```
 
-- `language`：`en`（默认）/ `auto` / `zh` / `ja` …；非 `en` 需要多语言模型
-- `output`：`bilingual`（译文在上、原文在下）/ `translated` / `original`
-- `translate`：是否翻译，默认跟随服务启动参数
+- `language`：音频（源）语言，`en`（默认）/ `auto` / `zh` / `ja` …；非 `en` 需要多语言模型
+- `output`：想要什么语言的字幕 —— `bilingual`（中英对照）/ `translated`（仅译文）/ `original`（仅原文）
+- `target`：译文目标语言，默认 `zh`
 - `cid` 可省略，服务会自己查
+
+**没有单独的"翻译开关"**：`output` 不是 `original` 就要译文，源语言与目标语言相同时自动跳过翻译（比如中文视频要中文字幕）。
 
 命令行试一下：
 

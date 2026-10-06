@@ -3,10 +3,9 @@ const el = {
   progress: document.getElementById("progress"),
   progressFill: document.getElementById("progressFill"),
   message: document.getElementById("message"),
-  propTitle: document.getElementById("propTitle"),
-  propUrl: document.getElementById("propUrl"),
-  propCreated: document.getElementById("propCreated"),
-  propTags: document.getElementById("propTags"),
+  videoTitle: document.getElementById("videoTitle"),
+  videoMeta: document.getElementById("videoMeta"),
+  previewCount: document.getElementById("previewCount"),
   subtitleSelect: document.getElementById("subtitleSelect"),
   preview: document.getElementById("preview"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -18,6 +17,15 @@ const el = {
   aiBtn: document.getElementById("aiBtn"),
   settingsBtn: document.getElementById("settingsBtn")
 };
+
+// 没有字幕轨时，"语言"里选的是想要什么语言的字幕。
+// 选中文就意味着要翻译——所以不再单独放一个"自动翻译"开关。
+const OUTPUT_MODES = [
+  { value: "bilingual", label: "中英对照" },
+  { value: "translated", label: "仅中文" },
+  { value: "original", label: "仅原文" }
+];
+const OUTPUT_MODE_VALUES = new Set(OUTPUT_MODES.map((item) => item.value));
 
 let latestPayload = null;
 let whisperPollTimer = 0;
@@ -133,17 +141,9 @@ function bindEvents() {
     render(resp?.payload || latestPayload);
   });
 
-  el.whisperBtn?.addEventListener("click", async () => {
-    el.whisperBtn.disabled = true;
-    setStatus("正在提交转写任务...");
-    const resp = await sendToContent({ type: "popup-generate-subtitle" });
-    if (!resp?.ok) {
-      setStatus(`生成失败：${resp?.error || "未知错误"}`, true);
-      render(resp?.payload || latestPayload, { preserveStatus: true });
-      return;
-    }
-    render(resp?.payload || latestPayload);
-    pollWhisperProgress();
+  el.whisperBtn?.addEventListener("click", () => {
+    const output = String(latestPayload?.whisperOutput || el.subtitleSelect?.value || "bilingual");
+    startWhisperGeneration(output);
   });
 
   el.readingViewBtn?.addEventListener("click", async () => {
@@ -177,12 +177,28 @@ function bindEvents() {
   });
 
   el.subtitleSelect.addEventListener("change", async (event) => {
+    const value = String(event.target.value || "");
+    if (!value) {
+      return;
+    }
+
+    // 无字幕轨（或当前就是生成的字幕）时，这里选的是输出语言：
+    // 选定即开始生成，选中文就自动翻译
+    if (latestPayload?.whisperTrack || latestPayload?.canGenerate) {
+      if (!OUTPUT_MODE_VALUES.has(value)) {
+        return;
+      }
+      await sendToRuntime({ type: "save-settings", settings: { whisperOutputMode: value } });
+      await startWhisperGeneration(value);
+      return;
+    }
+
+    setStatus("正在切换字幕...");
     const option = event.target.options[event.target.selectedIndex];
     const url = String(option?.value || "");
     if (!url) {
       return;
     }
-    setStatus("正在切换字幕...");
     const resp = await sendToContent({
       type: "popup-select-subtitle",
       url,
@@ -247,6 +263,31 @@ async function refreshFromTab() {
  * 转写在页面里跑，popup 只负责看进度。
  * 必须轮询而不是 await：popup 一失焦就被关掉，任务不能跟着死。
  */
+async function startWhisperGeneration(output) {
+  if (el.whisperBtn) {
+    el.whisperBtn.disabled = true;
+  }
+  if (el.subtitleSelect) {
+    el.subtitleSelect.disabled = true;
+  }
+  const label = outputLabel(output);
+  setStatus(`正在生成${label ? `「${label}」` : ""}字幕...`);
+
+  const resp = await sendToContent({ type: "popup-generate-subtitle", output });
+  if (!resp?.ok) {
+    setStatus(`生成失败：${resp?.error || "未知错误"}`, true);
+    render(resp?.payload || latestPayload, { preserveStatus: true });
+    return;
+  }
+  render(resp?.payload || latestPayload);
+  pollWhisperProgress();
+}
+
+function outputLabel(value) {
+  const found = OUTPUT_MODES.find((item) => item.value === value);
+  return found ? found.label : "";
+}
+
 function pollWhisperProgress() {
   window.clearTimeout(whisperPollTimer);
   whisperPollFailures = 0;
@@ -316,15 +357,21 @@ function render(payload, { preserveStatus = false } = {}) {
     setMessage(`页面里是旧版脚本（${payload.contentVersion}），请刷新页面（⌘R / Ctrl+R）后再试。`);
   }
 
-  setText(el.propTitle, payload.title || "-");
-  setText(el.propUrl, payload.url || "-");
-  setText(el.propCreated, formatLocalDate());
-  setText(el.propTags, payload.tags || "clippings");
-  el.propTitle.title = payload.title || "";
-  el.propUrl.title = payload.url || "";
+  setText(el.videoTitle, payload.title || "尚未识别视频");
+  el.videoTitle.title = payload.title || "";
+  setText(el.videoMeta, buildMetaLine(payload));
 
   const options = payload.subtitleOptions || [];
-  if (options.length === 0) {
+  // 没有字幕轨时，"语言"里放的是想要的输出语言；已经生成出来后
+  // 也继续放这几个选项，换一个就等于重新生成
+  if (payload.canGenerate || payload.whisperTrack) {
+    const current = String(payload.whisperOutput || "bilingual");
+    el.subtitleSelect.innerHTML = OUTPUT_MODES.map(
+      (item) =>
+        `<option value="${item.value}"${item.value === current ? " selected" : ""}>${item.label}</option>`
+    ).join("");
+    el.subtitleSelect.disabled = Boolean(payload.generating);
+  } else if (options.length === 0) {
     el.subtitleSelect.innerHTML = '<option value="">暂无字幕</option>';
     el.subtitleSelect.disabled = true;
   } else {
@@ -343,7 +390,21 @@ function render(payload, { preserveStatus = false } = {}) {
   }
 
   el.preview.value = payload.subtitlePreview || "";
+  setText(el.previewCount, countPreviewLines(payload.subtitlePreview));
   applyGenerationState(payload);
+}
+
+function buildMetaLine(payload) {
+  const parts = [payload.author, payload.bvid, payload.uploadDate].filter(Boolean);
+  if (parts.length) {
+    return parts.join(" · ");
+  }
+  return String(payload.url || "");
+}
+
+function countPreviewLines(text) {
+  const lines = String(text || "").split("\n").filter((line) => line.trim()).length;
+  return lines ? `${lines} 行` : "";
 }
 
 /**
@@ -374,8 +435,13 @@ function setText(node, text) {
 }
 
 function setStatus(text, isError = false) {
-  el.status.textContent = String(text || "");
+  const value = String(text || "");
+  el.status.textContent = value;
   el.status.classList.toggle("is-error", Boolean(isError));
+  el.status.classList.toggle(
+    "is-ok",
+    !isError && /完成|就绪|已生成|已复制|已下载|已写入|已保存/.test(value)
+  );
 }
 
 function setMessage(text) {
