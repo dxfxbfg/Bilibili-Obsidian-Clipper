@@ -22,8 +22,8 @@
   --ok: #34d399;
   --err: #f87171;
 
-  --r-sm: 9px;
-  --r-md: 12px;
+  --r-sm: 13px;
+  --r-md: 17px;
 }
 
 html,
@@ -209,53 +209,6 @@ body {
 
 /* ---------- 状态 ---------- */
 
-.status {
-  flex: 0 0 auto;
-  margin: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-dim);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  padding: 7px 10px;
-}
-
-.status[hidden] {
-  display: none;
-}
-
-.status::before {
-  content: "";
-  flex: 0 0 auto;
-  width: 5px;
-  height: 5px;
-  margin-top: 4px;
-  border-radius: 50%;
-  background: var(--text-faint);
-}
-
-.status.is-ok {
-  color: var(--ok);
-}
-
-.status.is-ok::before {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14);
-}
-
-.status.is-error {
-  color: var(--err);
-}
-
-.status.is-error::before {
-  background: var(--err);
-  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.14);
-}
-
 .progress {
   flex: 0 0 auto;
   padding: 0 1px;
@@ -403,6 +356,10 @@ body {
 
 /* ---------- 操作 ---------- */
 
+.actions[hidden] {
+  display: none;
+}
+
 .actions {
   flex: 0 0 auto;
   display: grid;
@@ -480,9 +437,17 @@ button:disabled {
 .message {
   margin: 0;
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-faint);
-  line-height: 1.5;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.message.is-error {
+  color: var(--err);
 }
 
 .message:empty {

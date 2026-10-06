@@ -39,6 +39,11 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
+  popupShowCopy: true,
+  popupShowDownload: true,
+  popupShowReading: true,
+  popupShowAi: true,
+  popupShowSettings: true,
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
   whisperOutputMode: "bilingual",
@@ -93,6 +98,11 @@ const elements = {
   playerAiQuickPrompt: document.getElementById("playerAiQuickPrompt"),
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
+  popupShowCopy: document.getElementById("popupShowCopy"),
+  popupShowDownload: document.getElementById("popupShowDownload"),
+  popupShowReading: document.getElementById("popupShowReading"),
+  popupShowAi: document.getElementById("popupShowAi"),
+  popupShowSettings: document.getElementById("popupShowSettings"),
   enableWhisperFallback: document.getElementById("enableWhisperFallback"),
   whisperHelperUrl: document.getElementById("whisperHelperUrl"),
   whisperOutputMode: document.getElementById("whisperOutputMode"),
@@ -151,6 +161,11 @@ async function loadSettings() {
   elements.playerAiQuickPrompt.value = String(settings.playerAiQuickPrompt || "");
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
+  elements.popupShowCopy.checked = settings.popupShowCopy !== false;
+  elements.popupShowDownload.checked = settings.popupShowDownload !== false;
+  elements.popupShowReading.checked = settings.popupShowReading !== false;
+  elements.popupShowAi.checked = settings.popupShowAi !== false;
+  elements.popupShowSettings.checked = settings.popupShowSettings !== false;
   elements.enableWhisperFallback.checked = settings.enableWhisperFallback !== false;
   elements.whisperHelperUrl.value = settings.whisperHelperUrl || DEFAULT_SETTINGS.whisperHelperUrl;
   elements.whisperOutputMode.value = normalizeWhisperOutputMode(settings.whisperOutputMode);
@@ -271,6 +286,11 @@ function collectFormPayload() {
     playerAiQuickPrompt: normalizePlayerAiQuickPrompt(elements.playerAiQuickPrompt.value),
     includeTimestampInBody: elements.includeTimestampInBody.checked,
     enableDebugLogs: elements.enableDebugLogs.checked,
+    popupShowCopy: elements.popupShowCopy.checked,
+    popupShowDownload: elements.popupShowDownload.checked,
+    popupShowReading: elements.popupShowReading.checked,
+    popupShowAi: elements.popupShowAi.checked,
+    popupShowSettings: elements.popupShowSettings.checked,
     enableWhisperFallback: elements.enableWhisperFallback.checked,
     whisperHelperUrl: normalizeHelperUrl(elements.whisperHelperUrl.value),
     whisperOutputMode: normalizeWhisperOutputMode(elements.whisperOutputMode.value),

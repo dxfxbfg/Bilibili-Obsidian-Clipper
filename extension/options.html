@@ -82,6 +82,18 @@
       </label>
 
       <section class="field-group">
+        <h2>面板显示</h2>
+        <p class="hint">勾掉的项目会从弹窗里隐藏。拷贝/下载/阅读全勾掉时整行收起。</p>
+        <div class="field-grid">
+          <label class="mini-checkbox"><input id="popupShowCopy" type="checkbox" /> 复制</label>
+          <label class="mini-checkbox"><input id="popupShowDownload" type="checkbox" /> 下载</label>
+          <label class="mini-checkbox"><input id="popupShowReading" type="checkbox" /> 阅读</label>
+          <label class="mini-checkbox"><input id="popupShowAi" type="checkbox" /> 右上角 AI</label>
+          <label class="mini-checkbox"><input id="popupShowSettings" type="checkbox" /> 右上角 设置</label>
+        </div>
+      </section>
+
+      <section class="field-group">
         <h2>无字幕视频：生成字幕</h2>
         <p class="hint">
           视频没有字幕轨时，调用本机的字幕助手服务：取音频 → whisper 转写 → 可选翻译。

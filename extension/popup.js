@@ -1,5 +1,4 @@
 const el = {
-  status: document.getElementById("status"),
   progress: document.getElementById("progress"),
   progressFill: document.getElementById("progressFill"),
   message: document.getElementById("message"),
@@ -31,7 +30,12 @@ let whisperPollTimer = 0;
 let whisperPollFailures = 0;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 const DEFAULT_SETTINGS = {
-  downloadFormat: "srt"
+  downloadFormat: "srt",
+  popupShowCopy: true,
+  popupShowDownload: true,
+  popupShowReading: true,
+  popupShowAi: true,
+  popupShowSettings: true
 };
 
 function formatLocalDate(value = Date.now()) {
@@ -45,6 +49,7 @@ init().catch((error) => {
 
 async function init() {
   bindEvents();
+  applyPanelVisibility(await getSettingsFromRuntime());
 
   // 内容脚本如果已经抓过当前视频，先把结果直接画出来，不再白等一次
   // 完整的网络往返（视频信息 + 字幕列表 + 字幕内容）。
@@ -70,6 +75,27 @@ async function init() {
   }
 
   await refreshFromTab();
+}
+
+// 哪些按钮显示由设置决定；三个操作全关掉时整行收起
+function applyPanelVisibility(settings) {
+  const pairs = [
+    [el.copyBtn, settings.popupShowCopy],
+    [el.downloadBtn, settings.popupShowDownload],
+    [el.readingViewBtn, settings.popupShowReading],
+    [el.aiBtn, settings.popupShowAi],
+    [el.settingsBtn, settings.popupShowSettings]
+  ];
+  pairs.forEach(([node, visible]) => {
+    if (node) {
+      node.hidden = visible === false;
+    }
+  });
+
+  const actions = document.querySelector(".actions");
+  if (actions) {
+    actions.hidden = !actions.querySelector("button:not([hidden])");
+  }
 }
 
 function hasUsableSubtitle(payload) {
@@ -335,12 +361,11 @@ function render(payload, { preserveStatus = false } = {}) {
   }
   latestPayload = payload;
 
-  if (!preserveStatus) {
-    const statusText = String(payload.status || "准备就绪");
-    const isErrorStatus = /失败|错误|不可用|不支持/.test(statusText);
-    setStatus(statusText, isErrorStatus);
+  if (!preserveStatus && /失败|错误|不可用|不支持/.test(String(payload.status || ""))) {
+    setFeedback(payload.status, true);
+  } else {
+    setMessage(payload.message || "");
   }
-  setMessage(payload.message || "");
 
   // 页面里可能还挂着旧版注入脚本（扩展更新后没有刷新页面），
   // 那种情况下新入口是不存在的，直接说清楚而不是让人对着没反应的按钮猜。
@@ -351,10 +376,6 @@ function render(payload, { preserveStatus = false } = {}) {
   ) {
     setMessage(`页面里是旧版脚本（${payload.contentVersion}），请刷新页面（⌘R / Ctrl+R）后再试。`);
   }
-
-  // 正常状态下内容都在眼前，再报一遍条数只是噪音；
-  // 只有需要用户注意时才显示状态条（生成中 / 出错 / 没有字幕）。
-  el.status.hidden = !shouldShowStatus(payload);
 
   setText(el.videoTitle, payload.title || "尚未识别视频");
   el.videoTitle.title = payload.title || "";
@@ -391,21 +412,6 @@ function render(payload, { preserveStatus = false } = {}) {
   el.preview.value = payload.subtitlePreview || "";
   setText(el.previewCount, countPreviewLines(payload.subtitlePreview));
   applyGenerationState(payload);
-}
-
-function shouldShowStatus(payload) {
-  if (!payload) {
-    return true;
-  }
-  if (payload.generating || payload.canGenerate) {
-    return true;
-  }
-  const statusText = String(payload.status || "");
-  if (/失败|错误|无字幕|不支持|请刷新/.test(statusText)) {
-    return true;
-  }
-  // 还没抓到任何内容时也别沉默
-  return !hasUsableSubtitle(payload);
 }
 
 function buildMetaLine(payload) {
@@ -448,18 +454,25 @@ function setText(node, text) {
   node.textContent = String(text || "");
 }
 
+/**
+ * 过程性提示一律不显示——进度看进度条，状态看内容本身。
+ * 只有真正的异常才说出来，否则界面保持安静。
+ */
 function setStatus(text, isError = false) {
+  if (!isError) {
+    return;
+  }
+  setFeedback(text, true);
+}
+
+function setFeedback(text, isError = false) {
   const value = String(text || "");
-  el.status.textContent = value;
-  el.status.classList.toggle("is-error", Boolean(isError));
-  el.status.classList.toggle(
-    "is-ok",
-    !isError && /完成|就绪|已生成|已复制|已下载|已写入|已保存/.test(value)
-  );
+  el.message.textContent = value;
+  el.message.classList.toggle("is-error", Boolean(isError));
 }
 
 function setMessage(text) {
-  el.message.textContent = String(text || "");
+  setFeedback(text, false);
 }
 
 function sanitizeFileName(value) {
