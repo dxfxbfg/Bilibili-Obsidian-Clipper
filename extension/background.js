@@ -39,6 +39,8 @@ const DEFAULT_SYNC_SETTINGS = {
   enablePlayerAiQuickAction: false,
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
+  noteSectionTitle: "我的笔记",
+  collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
   popupShowDownload: true,

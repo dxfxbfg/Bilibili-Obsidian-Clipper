@@ -38,6 +38,8 @@ const DEFAULT_SETTINGS = {
   enablePlayerAiQuickAction: false,
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
+  noteSectionTitle: "我的笔记",
+  collapseSubtitleInNote: true,
   enableDebugLogs: false,
   popupShowCopy: true,
   popupShowDownload: true,
@@ -97,6 +99,8 @@ const elements = {
   enablePlayerAiQuickAction: document.getElementById("enablePlayerAiQuickAction"),
   playerAiQuickPrompt: document.getElementById("playerAiQuickPrompt"),
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
+  noteSectionTitle: document.getElementById("noteSectionTitle"),
+  collapseSubtitleInNote: document.getElementById("collapseSubtitleInNote"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
   popupShowCopy: document.getElementById("popupShowCopy"),
   popupShowDownload: document.getElementById("popupShowDownload"),
@@ -160,6 +164,9 @@ async function loadSettings() {
   elements.enablePlayerAiQuickAction.checked = Boolean(settings.enablePlayerAiQuickAction);
   elements.playerAiQuickPrompt.value = String(settings.playerAiQuickPrompt || "");
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
+  elements.noteSectionTitle.value =
+    settings.noteSectionTitle === undefined ? "我的笔记" : String(settings.noteSectionTitle || "");
+  elements.collapseSubtitleInNote.checked = settings.collapseSubtitleInNote !== false;
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
   elements.popupShowCopy.checked = settings.popupShowCopy !== false;
   elements.popupShowDownload.checked = settings.popupShowDownload !== false;
@@ -285,6 +292,8 @@ function collectFormPayload() {
     enablePlayerAiQuickAction: elements.enablePlayerAiQuickAction.checked,
     playerAiQuickPrompt: normalizePlayerAiQuickPrompt(elements.playerAiQuickPrompt.value),
     includeTimestampInBody: elements.includeTimestampInBody.checked,
+    noteSectionTitle: String(elements.noteSectionTitle.value || "").trim(),
+    collapseSubtitleInNote: elements.collapseSubtitleInNote.checked,
     enableDebugLogs: elements.enableDebugLogs.checked,
     popupShowCopy: elements.popupShowCopy.checked,
     popupShowDownload: elements.popupShowDownload.checked,

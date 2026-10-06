@@ -9,6 +9,8 @@ const DEFAULT_SETTINGS = {
   enablePlayerAiQuickAction: false,
   playerAiQuickPrompt: "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。",
   includeTimestampInBody: true,
+  noteSectionTitle: "我的笔记",
+  collapseSubtitleInNote: true,
   enableDebugLogs: false,
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
@@ -5524,6 +5526,16 @@ function buildMarkdown(meta, body, settings) {
     lines.push(frontMatter, "");
   }
   lines.push(embedIframe, "");
+
+  // 边看边记：笔记区紧跟视频。原来视频下面是整段字幕，笔记区被埋到最底下，
+  // 往下写的时候视频早滚出视野了。留空段落（默认"我的笔记"）也可以关掉。
+  const noteSectionTitle = String(
+    settings.noteSectionTitle === undefined ? "我的笔记" : settings.noteSectionTitle
+  ).trim();
+  if (noteSectionTitle) {
+    lines.push(`## ${noteSectionTitle}`, "");
+  }
+
   pushOptionalLines(lines, noteSections.before_intro);
 
   if (intro) {
@@ -5537,7 +5549,14 @@ function buildMarkdown(meta, body, settings) {
   }
 
   pushOptionalLines(lines, noteSections.before_subtitle);
-  lines.push("## 字幕", "", ...subtitleSectionLines);
+
+  // 字幕默认折叠成 callout：展开才占版面，收起时只占一行
+  if (settings.collapseSubtitleInNote !== false) {
+    lines.push("> [!quote]- 字幕（点击展开）");
+    lines.push(...subtitleSectionLines.map((line) => (line ? `> ${line}` : ">")));
+  } else {
+    lines.push("## 字幕", "", ...subtitleSectionLines);
+  }
 
   const hotCommentLines = buildHotCommentLines(
     settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
@@ -5940,7 +5959,7 @@ function buildBilibiliEmbedIframe(meta, page = 1) {
   const safeCid = encodeURIComponent(String(meta?.cid || "").trim());
   const safePage = Number(page) > 0 ? Number(page) : 1;
 
-  return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
+  return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0&high_quality=1&danmaku=0&as_wide=1" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
 }
 
 function buildSrt(body) {
