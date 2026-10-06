@@ -82,6 +82,44 @@
       </label>
 
       <section class="field-group">
+        <h2>无字幕视频：生成字幕</h2>
+        <p class="hint">
+          视频没有字幕轨时，调用本机的字幕助手服务：取音频 → whisper 转写 → 可选翻译。
+          需要先启动 <code>helper/boc_whisper_helper.py</code>，详见仓库 helper/README.md。
+        </p>
+        <label class="checkbox">
+          <input id="enableWhisperFallback" type="checkbox" />
+          无字幕时显示「生成字幕」按钮
+        </label>
+        <label for="whisperHelperUrl">字幕助手地址</label>
+        <input id="whisperHelperUrl" type="text" placeholder="例如：http://127.0.0.1:8788" />
+
+        <label class="checkbox">
+          <input id="whisperAutoTranslate" type="checkbox" />
+          生成后自动翻译成中文
+        </label>
+
+        <label for="whisperOutputMode">字幕输出形式</label>
+        <select id="whisperOutputMode">
+          <option value="bilingual">中英对照（译文在上）</option>
+          <option value="translated">仅译文</option>
+          <option value="original">仅原文</option>
+        </select>
+
+        <label for="whisperLanguage">音频语言</label>
+        <select id="whisperLanguage">
+          <option value="en">英语 en</option>
+          <option value="auto">自动检测（需多语言模型）</option>
+          <option value="zh">中文 zh</option>
+          <option value="ja">日语 ja</option>
+          <option value="ko">韩语 ko</option>
+        </select>
+
+        <label for="whisperModel">whisper 模型路径（留空用助手默认）</label>
+        <input id="whisperModel" type="text" placeholder="留空即可，例如：~/.cache/whisper.cpp/ggml-small.en.bin" />
+      </section>
+
+      <section class="field-group">
         <h2>笔记属性（Frontmatter）</h2>
         <p class="hint">勾选需要写入到 Obsidian 属性区的字段。</p>
         <div class="field-grid">
@@ -159,6 +197,7 @@
       <div class="action-row">
         <button id="saveBtn" type="button">保存设置</button>
         <button id="testConnectionBtn" class="secondary-btn" type="button">测试连接</button>
+        <button id="testWhisperBtn" class="secondary-btn" type="button">测试字幕助手</button>
       </div>
       <p id="status" class="status"></p>
 

@@ -10,6 +10,12 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。",
   includeTimestampInBody: true,
   enableDebugLogs: false,
+  enableWhisperFallback: true,
+  whisperHelperUrl: "http://127.0.0.1:8788",
+  whisperAutoTranslate: false,
+  whisperOutputMode: "bilingual",
+  whisperLanguage: "en",
+  whisperModel: "",
   readerTheme: "light",
   readerFontScale: "m",
   readerLetterSpacing: "normal",
@@ -325,6 +331,7 @@ const ids = {
   downloadBtn: "boc-download-btn",
   sendBtn: "boc-send-btn",
   refreshBtn: "boc-refresh-btn",
+  generateBtn: "boc-generate-btn",
   closeBtn: "boc-close-btn",
   settingsBtn: "boc-settings-btn",
   readingView: "boc-reading-view",
@@ -647,7 +654,9 @@ function bindSettingsWatcher() {
       !changes.readerLineHeight &&
       !changes.readerContentWidth &&
       !changes.readerChapterVisibility &&
-      !changes.readerTranscriptVisible
+      !changes.readerTranscriptVisible &&
+      !changes.enableWhisperFallback &&
+      !changes.whisperHelperUrl
     ) {
       return;
     }
@@ -658,6 +667,7 @@ function bindSettingsWatcher() {
         hydrateReaderStateFromSettings(settings);
         applyReadingViewPresentation();
         schedulePlayerAiQuickActionSync();
+        updateGenerateButtonVisibility();
       })
       .catch((error) => {
         logWarn("[BOC] failed to refresh settings after storage change", error);
@@ -690,6 +700,7 @@ function buildUiHtml() {
 
       <div class="boc-actions">
         <button id="${ids.refreshBtn}" type="button">刷新抓取</button>
+        <button id="${ids.generateBtn}" type="button" hidden>生成字幕（whisper）</button>
         <button id="${ids.copyBtn}" type="button">复制完整 Markdown</button>
         <button id="${ids.downloadBtn}" type="button">下载字幕</button>
         <button id="${ids.sendBtn}" type="button">发送到 Obsidian</button>
@@ -825,6 +836,10 @@ function bindUiEvents() {
 
   closeBtn.addEventListener("click", () => panel.classList.remove("open"));
   refreshBtn.addEventListener("click", refreshClip);
+  const generateBtn = byId(ids.generateBtn);
+  if (generateBtn) {
+    generateBtn.addEventListener("click", generateSubtitleByWhisper);
+  }
   select.addEventListener("change", onSubtitleChange);
   copyBtn.addEventListener("click", copyMarkdown);
   downloadBtn.addEventListener("click", downloadSubtitle);
@@ -1205,6 +1220,7 @@ async function refreshClip() {
     state.subtitleFetchState = "ready";
     renderMeta();
     renderSubtitleSelect();
+    updateGenerateButtonVisibility();
     if (state.readingViewOpen) {
       moveReadingMainInline();
       renderReadingView();
@@ -1434,6 +1450,14 @@ function renderSubtitleSelect() {
     return;
   }
 
+  // whisper 生成的字幕没有可切换的轨道，只展示来源
+  const generated = subtitles.find((item) => item?.generated);
+  if (generated) {
+    select.innerHTML = `<option value="" selected>${escapeHtml(generated.lanDoc || "whisper 生成")}</option>`;
+    select.disabled = true;
+    return;
+  }
+
   select.innerHTML = subtitles
     .map((item) => {
       const selectedById =
@@ -1460,6 +1484,13 @@ function renderReadingSubtitleSelect() {
 
   if (subtitles.length === 0) {
     select.innerHTML = '<option value="">暂无字幕</option>';
+    select.disabled = true;
+    return;
+  }
+
+  const generatedTrack = subtitles.find((item) => item?.generated);
+  if (generatedTrack) {
+    select.innerHTML = `<option value="" selected>${escapeHtml(generatedTrack.lanDoc || "whisper 生成")}</option>`;
     select.disabled = true;
     return;
   }
@@ -1559,6 +1590,142 @@ async function downloadSubtitle() {
   URL.revokeObjectURL(url);
 
   setMessage(`已下载：${filename}`);
+}
+
+/**
+ * 视频没有字幕轨时，调用本机字幕助手服务生成字幕：
+ * playurl 取音频 → whisper.cpp 转写 → 可选翻译 → 回填到与正常字幕一致的流程。
+ */
+async function generateSubtitleByWhisper() {
+  state.settings = await getSettings();
+  const helperUrl = String(state.settings.whisperHelperUrl || "").trim();
+  if (!helperUrl) {
+    setMessage("请先在设置里填写字幕助手地址。");
+    requestOpenOptions();
+    return;
+  }
+  if (!state.bvid || !state.cid) {
+    setMessage("还没拿到视频信息，请先点击“刷新抓取”。");
+    return;
+  }
+
+  const autoTranslate = Boolean(state.settings.whisperAutoTranslate);
+  const output = autoTranslate
+    ? normalizeWhisperOutputMode(state.settings.whisperOutputMode)
+    : "original";
+
+  const btn = byId(ids.generateBtn);
+  setBusyState(true);
+  if (btn) {
+    btn.textContent = "生成中…";
+  }
+  setMessage("");
+  setStatus("正在提交转写任务...");
+
+  const originalStatus = state.statusText;
+  let finished = false;
+  try {
+    const created = await sendRuntimeMessage({
+      type: "whisper-job-create",
+      helperUrl,
+      payload: {
+        bvid: state.bvid,
+        cid: state.cid,
+        aid: state.aid || "",
+        language: String(state.settings.whisperLanguage || "en"),
+        model: String(state.settings.whisperModel || ""),
+        translate: autoTranslate,
+        output
+      }
+    });
+    if (!created?.ok || !created.jobId) {
+      throw new Error(created?.error || "提交任务失败");
+    }
+
+    const jobId = created.jobId;
+    const deadline = Date.now() + 60 * 60 * 1000;
+    let job = null;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      const resp = await sendRuntimeMessage({ type: "whisper-job-status", helperUrl, jobId });
+      // 轮询允许偶发失败，继续等下一次
+      if (!resp?.ok || !resp.job) {
+        continue;
+      }
+      job = resp.job;
+      if (job.status === "running") {
+        setStatus(`生成字幕中 ${Number(job.percent) || 0}%：${job.message || ""}`);
+        continue;
+      }
+      break;
+    }
+
+    if (!job) {
+      throw new Error("拿不到任务状态，请确认字幕助手仍在运行。");
+    }
+    if (job.status === "error") {
+      throw new Error(job.error || "生成失败");
+    }
+    if (job.status !== "done") {
+      throw new Error("生成超时（超过 60 分钟）");
+    }
+
+    const cues = (job.cues || [])
+      .map((item) => ({
+        from: Number(item?.from) || 0,
+        to: Number(item?.to) || 0,
+        content: String(item?.content || item?.text || "").trim()
+      }))
+      .filter((item) => item.content);
+    if (!cues.length) {
+      throw new Error("生成结果为空");
+    }
+
+    const label = autoTranslate ? "whisper 生成 · 含译文" : "whisper 生成 · 原文";
+    state.subtitleBody = cues;
+    state.subtitles = [
+      { id: "whisper-generated", lan: "whisper", lanDoc: label, subtitleUrl: "", source: "whisper", generated: true }
+    ];
+    state.selectedSubtitleId = "whisper-generated";
+    state.selectedSubtitleUrl = "";
+    state.selectedSubtitleLang = label;
+    state.subtitleFetchState = "ready";
+
+    await refreshDerivedContent();
+    renderMeta();
+    renderSubtitleSelect();
+    updateGenerateButtonVisibility();
+    if (state.readingViewOpen) {
+      renderReadingView();
+      renderReadingStatus("字幕已由 whisper 生成。");
+      syncReadingViewPlayback(true);
+    }
+    finished = true;
+    setStatus(`已生成字幕，共 ${cues.length} 条，可以复制、下载或发送到 Obsidian。`);
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) {
+      setMessage("扩展刚刚更新，请刷新当前页面后重试。");
+    } else {
+      setMessage(`生成字幕失败：${getErrorMessage(error)}`);
+      setStatus(originalStatus || "生成字幕失败。");
+    }
+    logWarn("[BOC] whisper 生成字幕失败", error);
+  } finally {
+    if (btn) {
+      btn.textContent = "生成字幕（whisper）";
+    }
+    setBusyState(false);
+    if (!finished) {
+      updateGenerateButtonVisibility();
+    }
+  }
+}
+
+function normalizeWhisperOutputMode(value) {
+  if (value === "translated" || value === "original") {
+    return value;
+  }
+  return "bilingual";
 }
 
 async function sendToObsidian() {
@@ -1679,6 +1846,10 @@ function setBusyState(disabled) {
   byId(ids.sendBtn).disabled = disabled;
   byId(ids.refreshBtn).disabled = disabled;
   byId(ids.settingsBtn).disabled = disabled;
+  const generateBtn = byId(ids.generateBtn);
+  if (generateBtn) {
+    generateBtn.disabled = disabled;
+  }
   byId(ids.subtitleSelect).disabled = disabled || state.subtitles.length === 0;
 }
 
@@ -1703,6 +1874,19 @@ function applyNoSubtitleState() {
   state.srt = "";
   state.txt = "";
   byId(ids.preview).value = "";
+  updateGenerateButtonVisibility();
+}
+
+// 视频没有字幕轨时，是否显示"生成字幕"入口
+function updateGenerateButtonVisibility() {
+  const btn = byId(ids.generateBtn);
+  if (!btn) {
+    return;
+  }
+  const enabled = state.settings?.enableWhisperFallback !== false;
+  const shouldShow =
+    enabled && state.subtitleFetchState === "empty" && Boolean(state.bvid) && Boolean(state.cid);
+  btn.hidden = !shouldShow;
 }
 
 function cleanupReaderFloatingArtifacts(playerHost = state.readingPlayerHost) {

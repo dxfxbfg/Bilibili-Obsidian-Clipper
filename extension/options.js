@@ -39,6 +39,12 @@ const DEFAULT_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
+  enableWhisperFallback: true,
+  whisperHelperUrl: "http://127.0.0.1:8788",
+  whisperAutoTranslate: false,
+  whisperOutputMode: "bilingual",
+  whisperLanguage: "en",
+  whisperModel: "",
   frontmatterFields: [
     "title",
     "url",
@@ -88,6 +94,12 @@ const elements = {
   playerAiQuickPrompt: document.getElementById("playerAiQuickPrompt"),
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
+  enableWhisperFallback: document.getElementById("enableWhisperFallback"),
+  whisperHelperUrl: document.getElementById("whisperHelperUrl"),
+  whisperAutoTranslate: document.getElementById("whisperAutoTranslate"),
+  whisperOutputMode: document.getElementById("whisperOutputMode"),
+  whisperLanguage: document.getElementById("whisperLanguage"),
+  whisperModel: document.getElementById("whisperModel"),
   frontmatterFields: document.querySelectorAll('input[name="frontmatterField"]'),
   fixedPropertiesList: document.getElementById("fixedPropertiesList"),
   fixedPropertiesEmpty: document.getElementById("fixedPropertiesEmpty"),
@@ -102,6 +114,7 @@ const elements = {
   aiInitialQuickPrompts: document.querySelectorAll(".ai-initial-quick-prompt"),
   saveBtn: document.getElementById("saveBtn"),
   testConnectionBtn: document.getElementById("testConnectionBtn"),
+  testWhisperBtn: document.getElementById("testWhisperBtn"),
   status: document.getElementById("status")
 };
 
@@ -113,6 +126,7 @@ function init() {
   loadSettings();
   elements.saveBtn.addEventListener("click", saveSettings);
   elements.testConnectionBtn.addEventListener("click", testConnection);
+  elements.testWhisperBtn.addEventListener("click", testWhisperHelper);
   elements.addFixedPropertyBtn.addEventListener("click", () => addFixedPropertyRow());
   elements.addNoteSectionBtn.addEventListener("click", () => addNoteSectionRow());
   elements.addAiProviderBtn.addEventListener("click", () => addAiProviderRow());
@@ -139,6 +153,12 @@ async function loadSettings() {
   elements.playerAiQuickPrompt.value = String(settings.playerAiQuickPrompt || "");
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
+  elements.enableWhisperFallback.checked = settings.enableWhisperFallback !== false;
+  elements.whisperHelperUrl.value = settings.whisperHelperUrl || DEFAULT_SETTINGS.whisperHelperUrl;
+  elements.whisperAutoTranslate.checked = Boolean(settings.whisperAutoTranslate);
+  elements.whisperOutputMode.value = normalizeWhisperOutputMode(settings.whisperOutputMode);
+  elements.whisperLanguage.value = String(settings.whisperLanguage || "en");
+  elements.whisperModel.value = String(settings.whisperModel || "");
   const selectedFields = new Set(settings.frontmatterFields || DEFAULT_SETTINGS.frontmatterFields);
   elements.frontmatterFields.forEach((checkbox) => {
     checkbox.checked = selectedFields.has(checkbox.value);
@@ -220,6 +240,18 @@ function normalizeDownloadFormat(value) {
   return value === "txt" ? "txt" : "srt";
 }
 
+function normalizeWhisperOutputMode(value) {
+  if (value === "translated" || value === "original") {
+    return value;
+  }
+  return "bilingual";
+}
+
+function normalizeHelperUrl(value) {
+  const url = String(value || "").trim().replace(/\/+$/g, "");
+  return url || DEFAULT_SETTINGS.whisperHelperUrl;
+}
+
 function collectFormPayload() {
   const selectedFields = Array.from(elements.frontmatterFields)
     .filter((checkbox) => checkbox.checked)
@@ -242,6 +274,12 @@ function collectFormPayload() {
     playerAiQuickPrompt: normalizePlayerAiQuickPrompt(elements.playerAiQuickPrompt.value),
     includeTimestampInBody: elements.includeTimestampInBody.checked,
     enableDebugLogs: elements.enableDebugLogs.checked,
+    enableWhisperFallback: elements.enableWhisperFallback.checked,
+    whisperHelperUrl: normalizeHelperUrl(elements.whisperHelperUrl.value),
+    whisperAutoTranslate: elements.whisperAutoTranslate.checked,
+    whisperOutputMode: normalizeWhisperOutputMode(elements.whisperOutputMode.value),
+    whisperLanguage: String(elements.whisperLanguage.value || "en"),
+    whisperModel: String(elements.whisperModel.value || "").trim(),
     frontmatterFields: selectedFields,
     fixedFrontmatterProperties: normalizeFixedFrontmatterProperties(collectFixedPropertyRows()),
     notePlaceholderSections: normalizeNotePlaceholderSections(collectNoteSectionRows()),
@@ -864,6 +902,36 @@ function normalizeApiKey(value) {
   return String(value || "").trim().replace(/^Bearer\s+/i, "").trim();
 }
 
+
+async function testWhisperHelper() {
+  clearInputErrors();
+  const helperUrl = normalizeHelperUrl(elements.whisperHelperUrl.value);
+  elements.whisperHelperUrl.value = helperUrl;
+
+  setBusy(true);
+  setStatus("正在测试字幕助手...");
+  try {
+    const resp = await sendRuntimeMessage({ type: "whisper-helper-health", helperUrl });
+    if (!resp?.ok) {
+      setStatus(`字幕助手连接失败：${resp?.error || "未知错误"}`, true);
+      return;
+    }
+    const health = resp.health || {};
+    const missing = [];
+    if (!health.whisper) missing.push("whisper-cli");
+    if (!health.ffmpeg) missing.push("ffmpeg");
+    if (!health.model_found) missing.push("whisper 模型");
+    if (missing.length) {
+      setStatus(`服务在跑，但缺少：${missing.join("、")}`, true);
+      return;
+    }
+    setStatus(`字幕助手就绪（模型：${String(health.model).split("/").pop()}）`);
+  } catch (error) {
+    setStatus(`字幕助手连接失败：${error.message || "未知错误"}`, true);
+  } finally {
+    setBusy(false);
+  }
+}
 
 async function testConnection() {
   clearInputErrors();

@@ -40,6 +40,12 @@ const DEFAULT_SYNC_SETTINGS = {
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
+  enableWhisperFallback: true,
+  whisperHelperUrl: "http://127.0.0.1:8788",
+  whisperAutoTranslate: false,
+  whisperOutputMode: "bilingual",
+  whisperLanguage: "en",
+  whisperModel: "",
   readerTheme: "light",
   readerFontScale: "m",
   readerLetterSpacing: "normal",
@@ -967,6 +973,74 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "whisper-helper-health") {
+    const helperUrl = normalizeHelperBase(message.helperUrl);
+    if (!helperUrl) {
+      sendResponse({ ok: false, error: "缺少字幕助手地址" });
+      return false;
+    }
+
+    fetch(`${helperUrl}/health`, { method: "GET", cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          sendResponse({ ok: false, error: `字幕助手返回 HTTP ${response.status}` });
+          return;
+        }
+        const health = await response.json();
+        sendResponse({ ok: true, health });
+      })
+      .catch((error) => sendResponse({ ok: false, error: describeHelperError(error) }));
+
+    return true;
+  }
+
+  if (message.type === "whisper-job-create") {
+    const helperUrl = normalizeHelperBase(message.helperUrl);
+    if (!helperUrl) {
+      sendResponse({ ok: false, error: "缺少字幕助手地址" });
+      return false;
+    }
+
+    fetch(`${helperUrl}/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(message.payload || {})
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.job_id) {
+          sendResponse({ ok: false, error: data.error || `字幕助手返回 HTTP ${response.status}` });
+          return;
+        }
+        sendResponse({ ok: true, jobId: data.job_id });
+      })
+      .catch((error) => sendResponse({ ok: false, error: describeHelperError(error) }));
+
+    return true;
+  }
+
+  if (message.type === "whisper-job-status") {
+    const helperUrl = normalizeHelperBase(message.helperUrl);
+    const jobId = String(message.jobId || "").trim();
+    if (!helperUrl || !jobId) {
+      sendResponse({ ok: false, error: "缺少任务参数" });
+      return false;
+    }
+
+    fetch(`${helperUrl}/jobs/${encodeURIComponent(jobId)}`, { method: "GET", cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          sendResponse({ ok: false, error: `字幕助手返回 HTTP ${response.status}` });
+          return;
+        }
+        const job = await response.json();
+        sendResponse({ ok: true, job });
+      })
+      .catch((error) => sendResponse({ ok: false, error: describeHelperError(error) }));
+
+    return true;
+  }
+
   if (message.type === "write-obsidian-note") {
     const baseUrl = String(message.baseUrl || "").trim();
     const apiKey = String(message.apiKey || "").trim();
@@ -1494,6 +1568,23 @@ function formatConnectionError(error) {
   }
   if (message.includes("Failed to fetch")) {
     return "无法连接 Local REST API。请检查地址、HTTP/HTTPS 模式和证书信任。";
+  }
+  return message;
+}
+
+// ===== 字幕助手（whisper）=====
+
+function normalizeHelperBase(value) {
+  return String(value || "").trim().replace(/\/+$/g, "");
+}
+
+function describeHelperError(error) {
+  const message = String(error?.message || "").trim();
+  if (!message) {
+    return "字幕助手连接失败：未知错误";
+  }
+  if (message.includes("Failed to fetch")) {
+    return "连不上字幕助手，请确认它已启动（helper/boc_whisper_helper.py）且地址正确。";
   }
   return message;
 }

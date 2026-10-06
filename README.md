@@ -8,7 +8,7 @@
 
 在 B 站视频页抓取字幕，预览后可复制 Markdown、下载字幕文件，并一键写入 Obsidian（Local REST API）。
 
-> 注意：仅支持获取“有字幕轨”的 B 站视频字幕（播放器里有「字幕」选项，通常表示作者上传了外挂字幕或平台提供了 AI 字幕）；没有字幕轨的视频无法获取字幕。
+> 注意：视频播放器里没有「字幕」选项时，扩展抓不到字幕轨。这种视频可以用下面的**字幕助手**生成字幕。
 
 ## 功能
 
@@ -16,6 +16,37 @@
 - 字幕预览、复制 Markdown
 - 下载字幕文件（`srt/txt`）
 - 保存到 Obsidian（Local REST API）
+- 无字幕轨的视频：调本地助手跑 whisper 转写生成字幕，可选自动翻译（见下）
+
+### 无字幕视频生成字幕
+
+视频没有字幕轨时，扩展会显示「生成字幕（whisper）」按钮，走本机助手服务：
+
+```
+扩展 → POST /jobs → 助手服务
+                     ├─ playurl 取音频（未登录也能拿）
+                     ├─ ffmpeg 转 16kHz 单声道
+                     ├─ whisper-cli 转写
+                     └─ 可选：翻译成中文
+扩展轮询进度 → 拿回字幕后，走和普通字幕一样的预览 / 下载 / 写 Obsidian 流程
+```
+
+浏览器扩展不能执行本地程序，所以转写这一步放在本机服务里。先装好依赖并启动：
+
+```bash
+brew install whisper-cpp ffmpeg
+mkdir -p ~/.cache/whisper.cpp
+curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin \
+  https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+python3 helper/boc_whisper_helper.py
+```
+
+然后在扩展设置页的「无字幕视频：生成字幕」一节确认助手地址（默认 `http://127.0.0.1:8788`），点「测试字幕助手」验证连通。
+
+可配置项：是否显示生成按钮、助手地址、是否自动翻译、输出形式（中英对照 / 仅译文 / 仅原文）、音频语言、whisper 模型路径。
+
+细节、接口说明和开机自启配置见 [helper/README.md](helper/README.md)。
 
 ### 阅读视图（v1.0.18+）
 
@@ -66,6 +97,7 @@
 
 - `README.md` / `LICENSE`：项目说明与许可证
 - `extension/`：插件源码（manifest、js、css、icons）
+- `helper/`：字幕助手服务（无字幕轨视频的 whisper 转写 + 可选翻译）
 
 ## 用自己的 Agent 二次修改
 

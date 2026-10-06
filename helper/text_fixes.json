@@ -1,0 +1,9 @@
+{
+  "_说明": "whisper 听写偏差纠正表。replacements 的键是正则，值替换文本。只在转写原文上生效，翻译前应用。",
+  "replacements": {
+    "\\bbedroting\\b": "bed rotting",
+    "\\bBedroting\\b": "Bed rotting",
+    "\\bThe rotting may seem\\b": "Bed rotting may seem",
+    "\\bEating is usually viewed\\b": "Bed rotting is usually viewed"
+  }
+}
