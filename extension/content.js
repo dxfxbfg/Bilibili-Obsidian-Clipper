@@ -41,12 +41,14 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.6";
+const BOC_VERSION = "1.1.7";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 const state = {
   currentUrl: location.href,
   fetchRunId: 0,
+  autoRetryTimer: 0,
+  autoRetryCount: 0,
   bvid: "",
   aid: "",
   cid: "",
@@ -1017,6 +1019,11 @@ function startUrlWatcher() {
 }
 
 function resetClipState() {
+  if (state.autoRetryTimer) {
+    window.clearTimeout(state.autoRetryTimer);
+    state.autoRetryTimer = 0;
+  }
+  state.autoRetryCount = 0;
   state.bvid = "";
   state.aid = "";
   state.cid = "";
@@ -1070,16 +1077,17 @@ async function refreshClip() {
     state.settings = await getSettings();
     ensureRunActive(runId);
 
-    state.bvid = extractBvid(location.href);
-    if (!state.bvid) {
-      throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
+    const videoRef = extractVideoRef(location.href);
+    if (!videoRef) {
+      throw new Error("当前页面不是标准 BV/av 视频地址（番剧、课堂、活动页暂不支持）。");
     }
 
     const pageIndex = extractPageIndex(location.href);
     const oid = extractOid(location.href);
     const hasPageParam = hasExplicitPageParam(location.href);
-    const meta = await retryAsync(() => fetchVideoMeta(state.bvid), 2, 250);
+    const meta = await retryAsync(() => fetchVideoMeta(videoRef), 3, 500);
     ensureRunActive(runId);
+    state.bvid = String(meta.bvid || "");
 
     // 调试：打印 API 返回的原始数据
     logInfo("[BOC] raw meta data", {
@@ -1262,7 +1270,8 @@ async function refreshClip() {
       return;
     }
     state.subtitleFetchState = "error";
-    resetClipState();
+    // 只清字幕数据，保留已识别的视频信息——整体重置会让弹窗显示"尚未识别视频"
+    resetSubtitleState();
     state.subtitleFetchState = "error";
     if (state.readingViewOpen) {
       renderReadingView();
@@ -1272,6 +1281,7 @@ async function refreshClip() {
       return;
     }
     setStatus(`抓取失败：${getErrorMessage(error)}`);
+    scheduleAutoRetry(error, runId);
   } finally {
     if (runId === state.fetchRunId) {
       setBusyState(false);
@@ -4667,6 +4677,68 @@ function byIdOptional(id) {
   return document.getElementById(id) || null;
 }
 
+/**
+ * 从 URL 识别视频引用。BV 号优先，兼容 /video/av123 老链接。
+ * 番剧、课堂、活动页返回 null（这些页面走不了 view API）。
+ */
+function extractVideoRef(url) {
+  const bvid = extractBvid(url);
+  if (bvid) {
+    return { kind: "bvid", id: bvid };
+  }
+  const match = url.match(/\/video\/av(\d+)/i);
+  if (match?.[1]) {
+    return { kind: "aid", id: match[1] };
+  }
+  return null;
+}
+
+/** 失败时只清字幕数据，保留已识别的视频信息 */
+function resetSubtitleState() {
+  state.subtitles = [];
+  state.selectedSubtitleId = "";
+  state.selectedSubtitleUrl = "";
+  state.selectedSubtitleLang = "";
+  state.subtitleBody = [];
+  state.chapters = [];
+  state.hotComments = [];
+}
+
+/** 抓取失败后自动重试：页面没加载完、B 站风控、网络抖动都能自愈 */
+function scheduleAutoRetry(error, runId) {
+  if (isStaleRunError(error)) {
+    return;
+  }
+  const message = String(error?.message || "");
+  // 页面类型或内容本身的问题，重试无用
+  if (/不是标准 BV/.test(message) || error?.code === "SUBTITLE_DURATION_MISMATCH") {
+    return;
+  }
+  if (state.autoRetryTimer) {
+    return; // 已有重试在排队
+  }
+  const attempt = (state.autoRetryCount || 0) + 1;
+  if (attempt > 3) {
+    state.autoRetryCount = 0;
+    return;
+  }
+  const delay = 2000 * attempt;
+  state.autoRetryCount = attempt;
+  setStatus(
+    `抓取失败：${getErrorMessage(error)}，${Math.round(delay / 1000)} 秒后自动重试（${attempt}/3）…`
+  );
+  state.autoRetryTimer = window.setTimeout(() => {
+    state.autoRetryTimer = 0;
+    if (state.fetchRunId !== runId) {
+      return;
+    }
+    if (computeCurrentClipSignature() !== state.currentClipSignature) {
+      return;
+    }
+    refreshClip().catch(() => {});
+  }, delay);
+}
+
 function extractBvid(url) {
   const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
   if (match?.[1]) {
@@ -4807,12 +4879,23 @@ async function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function fetchVideoMeta(bvid) {
-  const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
-  logInfo("[BOC] fetch video meta", { url, bvid });
+async function fetchVideoMeta(videoRef) {
+  const param =
+    videoRef.kind === "aid"
+      ? `aid=${encodeURIComponent(videoRef.id)}`
+      : `bvid=${encodeURIComponent(videoRef.id)}`;
+  const url = `https://api.bilibili.com/x/web-interface/view?${param}`;
+  logInfo("[BOC] fetch video meta", { url, videoRef });
   const payload = await fetchJson(url);
   if (payload.code !== 0) {
-    throw new Error(toReadableText(payload?.message, "无法获取视频信息"));
+    // -412/-799 是 B 站风控，稍等重试通常能过
+    const error = new Error(
+      `${toReadableText(payload?.message, "无法获取视频信息")}（code ${payload.code}）`
+    );
+    if (payload.code === -412 || payload.code === -799) {
+      error.retryable = true;
+    }
+    throw error;
   }
 
   const data = payload.data || {};
@@ -4821,6 +4904,7 @@ async function fetchVideoMeta(bvid) {
   const pages = Array.isArray(data.pages) ? data.pages : [];
 
   return {
+    bvid: String(data.bvid || ""),
     aid: data.aid ? String(data.aid) : "",
     title: String(data.title || ""),
     author: String(data.owner?.name || ""),
