@@ -34,9 +34,44 @@ curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin \
 
 ## 启动
 
+手动跑：
+
 ```bash
 python3 helper/boc_whisper_helper.py
 ```
+
+**推荐：注册成 LaunchAgent（开机自启 + 崩溃自动拉起，本项目已配置）**
+
+```bash
+cat > ~/Library/LaunchAgents/com.knight.boc-whisper-helper.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.knight.boc-whisper-helper</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string>
+		<string>/Users/mac/项目/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py</string>
+	</array>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key><true/>
+	<key>ThrottleInterval</key><integer>10</integer>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- PATH 必须包含 /opt/homebrew/bin，否则找不到 whisper-cli 和 ffmpeg -->
+		<key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StandardOutPath</key><string>/Users/mac/Library/Logs/boc-whisper-helper.log</string>
+	<key>StandardErrorPath</key><string>/Users/mac/Library/Logs/boc-whisper-helper.log</string>
+</dict>
+</plist>
+PLIST
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.knight.boc-whisper-helper.plist
+curl -s http://127.0.0.1:8788/health
+```
+
+两个坑：① PATH 里没有 `/opt/homebrew/bin` 时 whisper-cli/ffmpeg 找不到（health 里 whisper/ffmpeg 为 false）；② 改完 plist 后 `launchctl kickstart -k` 不会重读文件，要 `bootout` + `bootstrap`。日志在 `~/Library/Logs/boc-whisper-helper.log`。
 
 常用参数：
 
