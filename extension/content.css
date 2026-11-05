@@ -1659,3 +1659,56 @@ body[data-boc-reader-mode="1"] [class*="mini-player"],
 body[data-boc-reader-mode="1"] [class*="picture-in-picture"] {
   display: none !important;
 }
+
+.boc-target-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.boc-target-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #6b6b6b;
+}
+
+.boc-target-select {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid #cfcfcf;
+  background: #f8f8f8;
+  border-radius: 9px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+}
+
+.boc-target-select[hidden] {
+  display: none;
+}
+
+.boc-target-select:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.boc-actions button.boc-split-btn {
+  border-color: #4a7dff;
+  background: #eef3ff;
+  color: #2b5bd7;
+  font-weight: 600;
+}
+
+.boc-actions button.boc-split-btn:hover {
+  background: #e2eaff;
+}
+
+.boc-build {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #9a9a9a;
+  text-align: right;
+}

@@ -1,3 +1,28 @@
+// 本机私有的仓库清单（含 key），放在 targets.local.json，不进仓库。
+// 用 fetch 读而不是 importScripts：读不到只是没有预设，不会把 service worker 带崩。
+let localTargetPresetCache = null;
+async function loadLocalTargetPreset() {
+  if (localTargetPresetCache) {
+    return localTargetPresetCache;
+  }
+  localTargetPresetCache = { targets: [], active: "", version: 0 };
+  try {
+    // 必须 no-store：扩展资源的 HTTP 缓存会让改完的 targets.local.json 读不到新内容
+    const response = await fetch(chrome.runtime.getURL("targets.local.json"), { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      localTargetPresetCache = {
+        targets: Array.isArray(data?.targets) ? data.targets : [],
+        active: String(data?.active || ""),
+        version: Number(data?.version) || 1
+      };
+    }
+  } catch (error) {
+    console.info("[BOC] 没有 targets.local.json，按单仓库模式跑");
+  }
+  return localTargetPresetCache;
+}
+
 const DEFAULT_PRESET_PROMPTS = [
   "生成视频摘要和结论",
   "按章节整理视频内容",
@@ -32,6 +57,15 @@ const DEFAULT_AI_SYSTEM_PROMPT = [
 const DEFAULT_SYNC_SETTINGS = {
   noteFolder: "Clippings/Bilibili",
   obsidianApiBaseUrl: "http://127.0.0.1:27123",
+  obsidianTargets: [],
+  activeTargetId: "",
+  // 必须列在这里：storage.sync.get(DEFAULT_SYNC_SETTINGS) 只返回请求里出现过的键，
+  // 漏掉它 appliedVersion 永远是 0，设置每读一次就被 targets.local.json 覆盖一次
+  localTargetPresetVersion: 0,
+  panelShowCopy: true,
+  panelShowDownload: true,
+  deskHelperUrl: "http://127.0.0.1:8789",
+  deskLayout: "right",
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
@@ -86,7 +120,41 @@ const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || 
 
 chrome.runtime.onInstalled.addListener(async () => {
   await initializeSettingsStorage();
+  await seedLocalTargets();
 });
+
+// 把 targets.local.json 里的本机仓库写进 storage，只在还没配过的时候做一次
+async function seedLocalTargets() {
+  const preset = await loadLocalTargetPreset();
+  if (!preset.targets.length) {
+    return;
+  }
+  const current = await chrome.storage.sync.get({
+    obsidianTargets: [],
+    activeTargetId: "",
+    localTargetPresetVersion: 0
+  });
+  const presetVersion = Number(preset.version) || 1;
+  const appliedVersion = Number(current.localTargetPresetVersion) || 0;
+  const hasTargets = Array.isArray(current.obsidianTargets) && current.obsidianTargets.length;
+  // 配置没升级过就不动；版本抬高了才按预设重写，这样改 targets.local.json 能生效
+  if (hasTargets && appliedVersion >= presetVersion) {
+    return;
+  }
+  const wantedId = preset.active || preset.targets[0].id;
+  const active = preset.targets.find((item) => item.id === wantedId) || preset.targets[0];
+  await chrome.storage.sync.set({
+    obsidianTargets: preset.targets,
+    activeTargetId: active.id,
+    obsidianApiBaseUrl: active.baseUrl,
+    noteFolder: active.folder,
+    localTargetPresetVersion: presetVersion
+  });
+  await chrome.storage.local.set({ obsidianApiKey: active.apiKey });
+  console.info("[BOC] 已写入本机仓库配置：" + preset.targets.map((item) => item.name).join("、"));
+}
+
+seedLocalTargets().catch((error) => console.warn("[BOC] 写入本机仓库配置失败", error));
 
 async function ensureReaderContentReady(tabId) {
   if (!chrome.scripting || !tabId) {
@@ -852,6 +920,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "ensure-desk-helper") {
+    // 桌面助手按需启动：助手自己有空闲超时（默认 90 秒无请求退出），这里只负责叫醒
+    chrome.runtime.sendNativeMessage(
+      "com.boc.desk",
+      { cmd: message.cmd || "start" },
+      (response) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          sendResponse({ ok: false, error: err.message });
+        } else {
+          sendResponse({ ok: true, ...(response || {}) });
+        }
+      }
+    );
+    return true;
+  }
+
   if (message.type === "get-settings") {
     getMergedSettings()
       .then((settings) => sendResponse({ ok: true, settings }))
@@ -1038,7 +1123,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     fetch(`${helperUrl}/jobs/${encodeURIComponent(jobId)}`, { method: "GET", cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) {
-          sendResponse({ ok: false, error: `字幕助手返回 HTTP ${response.status}` });
+          sendResponse({ ok: false, status: response.status, error: `字幕助手返回 HTTP ${response.status}` });
           return;
         }
         const job = await response.json();
@@ -1391,6 +1476,34 @@ async function getMergedSettings() {
   ]);
 
   const merged = { ...DEFAULT_SYNC_SETTINGS, ...syncSettings };
+
+  // 本机私有仓库兜底：storage 里没配过、或者 targets.local.json 的版本抬高了，
+  // 都用文件里的那套覆盖一次。读设置时顺手升级，不依赖 service worker 启动时机。
+  const preset = await loadLocalTargetPreset();
+  const localTargets = preset.targets;
+  const presetVersion = Number(preset.version) || 0;
+  const appliedVersion = Number(merged.localTargetPresetVersion) || 0;
+  const missingTargets = !Array.isArray(merged.obsidianTargets) || !merged.obsidianTargets.length;
+  if (localTargets.length && (missingTargets || presetVersion > appliedVersion)) {
+    const activeTarget = localTargets.find((item) => item.id === preset.active) || localTargets[0];
+    merged.obsidianTargets = localTargets;
+    merged.activeTargetId = activeTarget.id;
+    merged.obsidianApiBaseUrl = activeTarget.baseUrl;
+    merged.noteFolder = activeTarget.folder;
+    merged.localTargetPresetVersion = presetVersion;
+    if (!merged.obsidianApiKey) {
+      merged.obsidianApiKey = activeTarget.apiKey;
+    }
+    chrome.storage.sync
+      .set({
+        obsidianTargets: localTargets,
+        activeTargetId: activeTarget.id,
+        obsidianApiBaseUrl: activeTarget.baseUrl,
+        noteFolder: activeTarget.folder,
+        localTargetPresetVersion: presetVersion
+      })
+      .catch((error) => console.warn("[BOC] 回写仓库配置失败", error));
+  }
   merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);
   merged.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(merged.includeHotCommentsInNote);
   merged.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(merged.enablePlayerAiQuickAction);
@@ -1414,6 +1527,11 @@ async function getMergedSettings() {
     apiKey = legacySyncApiKey;
     await chrome.storage.local.set({ obsidianApiKey: apiKey });
     await chrome.storage.sync.remove("obsidianApiKey");
+  }
+
+  // 兜底用的 apiKey 被上面的空值盖掉过一次，这里补回来
+  if (!apiKey && merged.obsidianApiKey) {
+    apiKey = merged.obsidianApiKey;
   }
 
   return {

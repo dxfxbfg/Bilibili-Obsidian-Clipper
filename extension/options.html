@@ -41,8 +41,23 @@
         </ol>
       </section>
 
+      <label for="obsidianTarget">目标仓库</label>
+      <div class="target-picker">
+        <select id="obsidianTarget"></select>
+        <input id="targetName" type="text" placeholder="仓库名，如 课业" />
+      </div>
+      <div class="target-picker">
+        <button id="addTargetBtn" class="add-property-btn" type="button">+ 新增仓库</button>
+        <button id="removeTargetBtn" class="add-property-btn" type="button">删除当前</button>
+      </div>
+      <p class="hint inline-hint">每个仓库对应一个 Obsidian 实例的 Local REST API；多个库同时开着时，各自的端口要错开（如主库 27123、课业 27125）。</p>
+
       <label for="noteFolder">笔记目录（用于自动写入）</label>
       <input id="noteFolder" type="text" placeholder="例如：Clippings/Bilibili" />
+
+      <label for="targetSubfolders">可选的子目录（一行一个）</label>
+      <textarea id="targetSubfolders" rows="5" placeholder="在读/神经网络与深度学习/材料/参考&#10;在读/信息检索与数据挖掘/材料/参考"></textarea>
+      <p class="hint inline-hint">填了以后弹窗里会多一个目录下拉，可以直接选这些位置；留空就只写上面的笔记目录。</p>
       <p class="hint inline-hint">支持变量：{{created}} / {{upload_date}} / {{author}} / {{bvid}}，示例：Clippings/Bilibili/{{created}}</p>
 
       <label for="obsidianApiBaseUrl">Local REST API 地址</label>
@@ -51,6 +66,26 @@
       <label for="obsidianApiKey">Local REST API Key</label>
       <input id="obsidianApiKey" type="password" placeholder="填入 Obsidian Local REST API 的 Key" />
       <p class="hint inline-hint">填写完成后建议先点击下方“测试连接”。</p>
+
+      <label class="checkbox">
+        <input id="panelShowCopy" type="checkbox" />
+        浮层里显示「复制完整 Markdown」
+      </label>
+
+      <label class="checkbox">
+        <input id="panelShowDownload" type="checkbox" />
+        浮层里显示「下载字幕」
+      </label>
+
+      <label for="deskHelperUrl">桌面助手地址（「保存并并排」用）</label>
+      <input id="deskHelperUrl" type="text" placeholder="http://127.0.0.1:8789" />
+
+      <label for="deskLayout">并排时 Obsidian 放在</label>
+      <select id="deskLayout">
+        <option value="right">右边（B 站占左半屏）</option>
+        <option value="left">左边（B 站占右半屏）</option>
+      </select>
+      <p class="hint inline-hint">助手启动：<code>python helper/boc_desk_helper.py</code>。不开也能用「发送到 Obsidian」，只是不会自动摆窗口。</p>
 
       <label for="tags">默认标签（逗号分隔）</label>
       <input id="tags" type="text" placeholder="例如：clippings,bilibili,subtitle" />

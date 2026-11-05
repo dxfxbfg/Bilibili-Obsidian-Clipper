@@ -1760,7 +1760,7 @@ async function saveAssistantReplyToObsidian({ button, userPrompt, assistantMarkd
 
   const context = currentConversationMeta?.resolvedContext || contextData || currentConversationMeta?.contextRef || {};
   const filename = buildAiNoteFilename(context, prompt);
-  const folder = resolveFolderTemplate(settingsBundle.settings.noteFolder || "", context);
+  const folder = resolveFolderTemplate(settingsBundle.folder || "", context);
   const filepath = folder ? `${folder}/${filename}` : filename;
   const noteContent = buildAiNoteMarkdown({
     context,
@@ -1792,7 +1792,7 @@ async function saveCurrentConversationToObsidian() {
 
   const context = currentConversationMeta?.resolvedContext || contextData || currentConversationMeta?.contextRef || {};
   const filename = buildAiConversationFilename(context);
-  const folder = resolveFolderTemplate(settingsBundle.settings.noteFolder || "", context);
+  const folder = resolveFolderTemplate(settingsBundle.folder || "", context);
   const filepath = folder ? `${folder}/${filename}` : filename;
   const noteContent = buildAiConversationMarkdown({
     context,
@@ -1809,6 +1809,26 @@ async function saveCurrentConversationToObsidian() {
   });
 }
 
+// 多仓库：侧边栏没有独立选择器，跟随设置页的默认仓库
+function resolveObsidianTarget(settings) {
+  const targets = Array.isArray(settings?.obsidianTargets) ? settings.obsidianTargets : [];
+  const target = targets.find((item) => item.id === settings?.activeTargetId) || targets[0];
+  if (target) {
+    return {
+      name: target.name || "仓库",
+      baseUrl: String(target.baseUrl || "").trim(),
+      apiKey: String(target.apiKey || "").trim(),
+      folder: String(target.folder || settings?.noteFolder || "")
+    };
+  }
+  return {
+    name: "默认",
+    baseUrl: String(settings?.obsidianApiBaseUrl || "").trim(),
+    apiKey: String(settings?.obsidianApiKey || "").trim(),
+    folder: String(settings?.noteFolder || "")
+  };
+}
+
 async function loadObsidianSettings() {
   const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch((error) => ({
     ok: false,
@@ -1820,15 +1840,14 @@ async function loadObsidianSettings() {
   }
 
   const settings = settingsResp.settings || {};
-  const baseUrl = String(settings.obsidianApiBaseUrl || "").trim();
-  const apiKey = String(settings.obsidianApiKey || "").trim();
-  if (!baseUrl || !apiKey) {
-    showConversationContextNotice("请先在设置页填写 Obsidian Local REST API 地址和 API Key。", 3500);
+  const target = resolveObsidianTarget(settings);
+  if (!target.baseUrl || !target.apiKey) {
+    showConversationContextNotice(`「${target.name}」还没有填 Local REST API 地址或 Key。`, 3500);
     chrome.runtime.openOptionsPage?.();
     return null;
   }
 
-  return { settings, baseUrl, apiKey };
+  return { settings, baseUrl: target.baseUrl, apiKey: target.apiKey, folder: target.folder, targetName: target.name };
 }
 
 async function saveMarkdownToObsidian({ button, filepath, content, baseUrl, apiKey }) {

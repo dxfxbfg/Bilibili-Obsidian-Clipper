@@ -2,6 +2,10 @@ const DEFAULT_SETTINGS = {
   noteFolder: "Clippings/Bilibili",
   obsidianApiBaseUrl: "http://127.0.0.1:27123",
   obsidianApiKey: "",
+  panelShowCopy: true,
+  panelShowDownload: true,
+  deskHelperUrl: "http://127.0.0.1:8789",
+  deskLayout: "right",
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
@@ -28,6 +32,7 @@ const DEFAULT_SETTINGS = {
   frontmatterFields: [
     "title",
     "url",
+    "cover",
     "bvid",
     "cid",
     "author",
@@ -41,16 +46,31 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.7";
+// 跟着 manifest 走，别再手写版本号——写死会导致更新后一直提示"页面里是旧版脚本"
+const BOC_VERSION = (() => {
+  try {
+    return chrome.runtime.getManifest().version || "1.2.0";
+  } catch {
+    return "1.2.0";
+  }
+})();
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 const state = {
   currentUrl: location.href,
+  selectedTargetId: (() => {
+    try {
+      return localStorage.getItem("boc_target_id") || "";
+    } catch {
+      return "";
+    }
+  })(),
   fetchRunId: 0,
   autoRetryTimer: 0,
   autoRetryCount: 0,
   bvid: "",
   aid: "",
+  coverPic: "",
   cid: "",
   cidSource: "",
   pageIndex: 1,
@@ -336,7 +356,11 @@ const ids = {
   message: "boc-message",
   copyBtn: "boc-copy-btn",
   downloadBtn: "boc-download-btn",
+  targetSelect: "boc-target-select",
+  subfolderSelect: "boc-subfolder-select",
+  targetRow: "boc-target-row",
   sendBtn: "boc-send-btn",
+  splitBtn: "boc-split-btn",
   refreshBtn: "boc-refresh-btn",
   generateBtn: "boc-generate-btn",
   closeBtn: "boc-close-btn",
@@ -391,6 +415,8 @@ function init() {
     state.settings = settings;
     hydrateReaderStateFromSettings(settings);
     applyReadingViewPresentation();
+    const targetSelectEl = document.getElementById(ids.targetSelect);
+    if (targetSelectEl) renderTargetSelect(targetSelectEl);
     startPlayerAiQuickActionObserver();
     schedulePlayerAiQuickActionSync();
     if (shouldEnterReaderMode) {
@@ -402,16 +428,19 @@ function init() {
 }
 
 function ensureUiReady({ forceRecreate = false } = {}) {
-  const existingRoot = document.getElementById(ids.root);
-  if (existingRoot && forceRecreate) {
-    existingRoot.remove();
+  let root = document.getElementById(ids.root);
+  // 扩展更新后页面里可能还挂着旧版 DOM，版本不一致就整个重建，否则新 UI 永远不出现
+  const stale = Boolean(root) && root.dataset.bocVersion !== BOC_VERSION;
+  if (root && (forceRecreate || stale)) {
+    root.remove();
+    root = null;
     state.uiEventsBound = false;
   }
 
-  let root = document.getElementById(ids.root);
   if (!root) {
     root = document.createElement("div");
     root.id = ids.root;
+    root.dataset.bocVersion = BOC_VERSION;
     root.innerHTML = buildUiHtml();
     document.body.appendChild(root);
     state.uiEventsBound = false;
@@ -531,7 +560,13 @@ function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-send-obsidian") {
-      sendToObsidian()
+      if (message.targetId) state.selectedTargetId = message.targetId;
+      // 空字符串表示「用仓库默认目录」，也要写进去，否则会沿用上一次选的子目录
+      if (typeof message.subfolder === "string") {
+        writeSubfolder(message.targetId || state.selectedTargetId, message.subfolder);
+      }
+      const runner = message.split ? saveAndSplit : sendToObsidian;
+      runner()
         .then(() => sendResponse({ ok: true, payload: getPopupPayload() }))
         .catch((error) =>
           sendResponse({ ok: false, error: getErrorMessage(error), payload: getPopupPayload() })
@@ -685,7 +720,9 @@ function bindSettingsWatcher() {
       !changes.readerChapterVisibility &&
       !changes.readerTranscriptVisible &&
       !changes.enableWhisperFallback &&
-      !changes.whisperHelperUrl
+      !changes.whisperHelperUrl &&
+      !changes.obsidianTargets &&
+      !changes.activeTargetId
     ) {
       return;
     }
@@ -697,6 +734,9 @@ function bindSettingsWatcher() {
         applyReadingViewPresentation();
         schedulePlayerAiQuickActionSync();
         updateGenerateButtonVisibility();
+        const select = document.getElementById(ids.targetSelect);
+        if (select) renderTargetSelect(select);
+        applyPanelVisibility();
       })
       .catch((error) => {
         logWarn("[BOC] failed to refresh settings after storage change", error);
@@ -727,14 +767,22 @@ function buildUiHtml() {
       <label class="boc-label" for="${ids.preview}">字幕预览</label>
       <textarea id="${ids.preview}" readonly></textarea>
 
+      <div id="${ids.targetRow}" class="boc-target-row">
+        <span class="boc-target-label">写入</span>
+        <select id="${ids.targetSelect}" class="boc-target-select" title="选择写入哪个仓库"></select>
+        <select id="${ids.subfolderSelect}" class="boc-target-select" title="选择这个仓库里的哪个目录"></select>
+      </div>
+
       <div class="boc-actions">
         <button id="${ids.refreshBtn}" type="button">刷新抓取</button>
         <button id="${ids.generateBtn}" type="button" hidden>生成字幕（whisper）</button>
         <button id="${ids.copyBtn}" type="button">复制完整 Markdown</button>
         <button id="${ids.downloadBtn}" type="button">下载字幕</button>
         <button id="${ids.sendBtn}" type="button">发送到 Obsidian</button>
+        <button id="${ids.splitBtn}" type="button" class="boc-split-btn">保存并并排</button>
       </div>
       <p id="${ids.message}" class="boc-message"></p>
+      <p class="boc-build">v${BOC_VERSION} · 保存并并排</p>
     </aside>
 
     <section id="${ids.readingView}" aria-hidden="true" data-boc-reader-ready="0" aria-busy="true">
@@ -873,6 +921,31 @@ function bindUiEvents() {
   copyBtn.addEventListener("click", copyMarkdown);
   downloadBtn.addEventListener("click", downloadSubtitle);
   sendBtn.addEventListener("click", sendToObsidian);
+  byIdOptional(ids.splitBtn)?.addEventListener("click", saveAndSplit);
+  applyPanelVisibility();
+
+  const targetSelect = byIdOptional(ids.targetSelect);
+  if (targetSelect) {
+    targetSelect.addEventListener("change", () => {
+      state.selectedTargetId = targetSelect.value;
+      try {
+        localStorage.setItem("boc_target_id", targetSelect.value);
+      } catch {
+        /* 无关紧要 */
+      }
+      renderTargetSelect(targetSelect);
+    });
+    renderTargetSelect(targetSelect);
+  }
+
+  const subfolderSelect = byIdOptional(ids.subfolderSelect);
+  if (subfolderSelect) {
+    subfolderSelect.addEventListener("change", () => {
+      const target = resolveObsidianTarget(state.settings);
+      writeSubfolder(target.id, subfolderSelect.value);
+      setMessage(`写入目录：${subfolderSelect.value || target.folder || ""}`);
+    });
+  }
   settingsBtn.addEventListener("click", requestOpenOptions);
   readingCloseBtn.addEventListener("click", () => {
     if (isReaderMode()) {
@@ -1026,6 +1099,7 @@ function resetClipState() {
   state.autoRetryCount = 0;
   state.bvid = "";
   state.aid = "";
+  state.coverPic = "";
   state.cid = "";
   state.cidSource = "";
   state.pageIndex = 1;
@@ -1088,6 +1162,7 @@ async function refreshClip() {
     const meta = await retryAsync(() => fetchVideoMeta(videoRef), 3, 500);
     ensureRunActive(runId);
     state.bvid = String(meta.bvid || "");
+    state.coverPic = String(meta.coverPic || "");
 
     // 调试：打印 API 返回的原始数据
     logInfo("[BOC] raw meta data", {
@@ -1706,6 +1781,10 @@ async function runWhisperGeneration(outputOverride) {
     while (Date.now() < deadline) {
       await sleep(1500);
       const resp = await sendRuntimeMessage({ type: "whisper-job-status", helperUrl, jobId });
+      // 任务在服务端不存在了（助手重启过或已清理），继续轮询没有意义
+      if (resp?.status === 404) {
+        throw new Error("字幕任务已失效（字幕助手重启过），请重新点一次生成。");
+      }
       // 轮询允许偶发失败，继续等下一次
       if (!resp?.ok || !resp.job) {
         continue;
@@ -1799,6 +1878,209 @@ function outputLabelText(value) {
   return "中英对照";
 }
 
+// 多仓库：优先用面板上选中的那个，其次用设置页的默认仓库，最后退回旧的单仓库字段
+function resolveObsidianTarget(settings) {
+  const targets = Array.isArray(settings?.obsidianTargets) ? settings.obsidianTargets : [];
+  const wanted = state.selectedTargetId || settings?.activeTargetId || "";
+  const target = targets.find((item) => item.id === wanted) || targets[0];
+  if (target) {
+    return {
+      id: target.id || "",
+      name: target.name || "仓库",
+      baseUrl: String(target.baseUrl || "").trim(),
+      apiKey: String(target.apiKey || "").trim(),
+      folder: String(target.folder || settings?.noteFolder || ""),
+      vault: String(target.vault || "")
+    };
+  }
+  return {
+    id: "",
+    name: "默认",
+    baseUrl: String(settings?.obsidianApiBaseUrl || "").trim(),
+    apiKey: String(settings?.obsidianApiKey || "").trim(),
+    folder: String(settings?.noteFolder || "")
+  };
+}
+
+function subfolderStorageKey(targetId) {
+  return "boc_subfolder_" + (targetId || "default");
+}
+
+function readSubfolder(targetId) {
+  try {
+    return localStorage.getItem(subfolderStorageKey(targetId)) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSubfolder(targetId, folder) {
+  try {
+    localStorage.setItem(subfolderStorageKey(targetId), folder || "");
+  } catch {
+    /* 无所谓 */
+  }
+}
+
+// 当前生效的写入目录：二级下拉优先，其次仓库默认目录
+function resolveFolderTemplateForTarget(target) {
+  const chosen = readSubfolder(target.id);
+  return String(chosen || target.folder || "");
+}
+
+function renderSubfolderSelect(target) {
+  const select = document.getElementById(ids.subfolderSelect);
+  if (!select) return;
+  const list = Array.isArray(target?.subfolders) ? target.subfolders.filter(Boolean) : [];
+  if (!list.length) {
+    select.hidden = true;
+    select.innerHTML = "";
+    // 子目录清空后别留着上次的选择，否则会一直往旧目录写
+    if (readSubfolder(target?.id)) writeSubfolder(target?.id, "");
+    return;
+  }
+  // 第一项是「不选」，落回设置页的笔记目录；以前默认挑第一个子目录，笔记目录等于被架空了
+  select.innerHTML = [
+    `<option value="">默认目录（${escapeHtml(target?.folder || "")}）</option>`,
+    ...list.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
+  ].join("");
+  const saved = readSubfolder(target.id);
+  select.value = list.includes(saved) ? saved : "";
+  select.hidden = false;
+}
+
+function renderTargetSelect(select) {
+  if (!select) return;
+  const targets = Array.isArray(state.settings?.obsidianTargets) ? state.settings.obsidianTargets : [];
+  const active = resolveObsidianTarget(state.settings);
+  const activeTarget = targets.find((item) => item.id === active.id) || targets[0] || null;
+
+  if (!targets.length) {
+    select.innerHTML = '<option value="">未配置仓库</option>';
+    select.disabled = true;
+  } else {
+    select.innerHTML = targets
+      .map((item) => `<option value="${escapeHtml(item.id || "")}">${escapeHtml(item.name || "仓库")}</option>`)
+      .join("");
+    select.value = active.id;
+    select.disabled = targets.length <= 1;
+  }
+  select.hidden = false;
+  renderSubfolderSelect(activeTarget);
+}
+
+// 浮层按钮可以按设置隐藏，界面清爽点
+function applyPanelVisibility() {
+  const settings = state.settings || {};
+  const copyBtn = document.getElementById(ids.copyBtn);
+  const downloadBtn = document.getElementById(ids.downloadBtn);
+  if (copyBtn) copyBtn.hidden = settings.panelShowCopy === false;
+  if (downloadBtn) downloadBtn.hidden = settings.panelShowDownload === false;
+}
+
+function buildObsidianOpenUri(vault, filepath) {
+  const params = [];
+  if (vault) params.push("vault=" + encodeURIComponent(vault));
+  params.push("file=" + encodeURIComponent(filepath));
+  return "obsidian://open?" + params.join("&");
+}
+
+// 保存后请桌面助手把浏览器和 Obsidian 摆成左右两半；没有助手就只保存
+// 桌面助手不常驻：先探一下，没起就让后台用 Native Messaging 拉起来，再等它就绪
+async function ensureDeskHelper(helper) {
+  const alive = async () => {
+    try {
+      const r = await fetch(`${helper}/health`, { cache: "no-store" });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await alive()) return true;
+
+  try {
+    await chrome.runtime.sendMessage({ type: "ensure-desk-helper", cmd: "start" });
+  } catch {
+    /* 后台不可用时继续轮询，可能它刚好自己起来了 */
+  }
+
+  for (let i = 0; i < 12; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (await alive()) return true;
+  }
+  return false;
+}
+
+async function saveAndSplit() {
+  state.settings = await getSettings();
+  await refreshDerivedContent();
+  if (!state.markdown) {
+    setMessage("没有可发送内容，请先刷新抓取。");
+    return;
+  }
+
+  const target = resolveObsidianTarget(state.settings);
+  const baseUrl = target.baseUrl;
+  const apiKey = target.apiKey;
+  if (!baseUrl || !apiKey) {
+    setMessage(`「${target.name}」还没有填 Local REST API 地址或 Key，去设置里补一下。`);
+    requestOpenOptions();
+    return;
+  }
+
+  const filename = buildNoteFilename(state);
+  const folder = resolveFolderTemplate(resolveFolderTemplateForTarget(target), state);
+  const filepath = folder ? `${folder}/${filename}` : filename;
+
+  try {
+    const exists = await checkObsidianNoteExists(baseUrl, apiKey, filepath);
+    if (exists) {
+      const shouldOverwrite = await confirmOverwriteNote(filepath);
+      if (!shouldOverwrite) {
+        setMessage("已取消保存，原笔记未被覆盖。");
+        return;
+      }
+    }
+    await writeNoteByLocalApi(baseUrl, apiKey, filepath, state.markdown);
+  } catch (error) {
+    setMessage(`写入失败：${getErrorMessage(error)}`);
+    return;
+  }
+
+  const uri = buildObsidianOpenUri(target.vault || "", filepath);
+  const helper = String(state.settings.deskHelperUrl || "").trim().replace(/\/+$/, "");
+  if (!helper) {
+    setMessage(`已写入 ${target.name}：${filepath}（没配桌面助手，手动开一下）`);
+    return;
+  }
+
+  if (!(await ensureDeskHelper(helper))) {
+    setMessage(`笔记已保存，但桌面助手没起来（${helper}）。看 helper/boc_native_host.py 是否被杀软拦了。`);
+    return;
+  }
+
+  try {
+    const response = await fetch(`${helper}/split`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: uri,
+        layout: state.settings.deskLayout === "left" ? "left" : "right",
+        vault: target.vault || ""
+      })
+    });
+    const data = await response.json().catch(() => null);
+    if (data && data.ok) {
+      setMessage(`已并排：${target.name} · ${filepath}`);
+    } else {
+      setMessage(`笔记已保存，并排没成功：${data?.error || "助手返回异常"}`);
+    }
+  } catch (error) {
+    setMessage(`笔记已保存，但连不上桌面助手（${helper}）。`);
+  }
+}
+
 async function sendToObsidian() {
   state.settings = await getSettings();
   await refreshDerivedContent();
@@ -1807,13 +2089,14 @@ async function sendToObsidian() {
     return;
   }
 
+  const target = resolveObsidianTarget(state.settings);
   const filename = buildNoteFilename(state);
-  const folder = resolveFolderTemplate(state.settings.noteFolder || "", state);
+  const folder = resolveFolderTemplate(resolveFolderTemplateForTarget(target), state);
   const filepath = folder ? `${folder}/${filename}` : filename;
-  const baseUrl = String(state.settings.obsidianApiBaseUrl || "").trim();
-  const apiKey = String(state.settings.obsidianApiKey || "").trim();
+  const baseUrl = target.baseUrl;
+  const apiKey = target.apiKey;
   if (!baseUrl || !apiKey) {
-    setMessage("请先在设置中填写 Obsidian Local REST API 地址和 API Key。");
+    setMessage(`「${target.name}」还没有填 Local REST API 地址或 Key，去设置里补一下。`);
     requestOpenOptions();
     return;
   }
@@ -1828,7 +2111,7 @@ async function sendToObsidian() {
       }
     }
     await writeNoteByLocalApi(baseUrl, apiKey, filepath, state.markdown);
-    setMessage(`已写入 Obsidian：${filepath}`);
+    setMessage(`已写入 ${target.name}：${filepath}`);
   } catch (error) {
     if (isExtensionContextInvalidated(error)) {
       setMessage("扩展刚刚更新，请刷新当前页面后重试。");
@@ -4906,6 +5189,7 @@ async function fetchVideoMeta(videoRef) {
   return {
     bvid: String(data.bvid || ""),
     aid: data.aid ? String(data.aid) : "",
+    coverPic: String(data.pic || "").replace(/^http:/, "https:"),
     title: String(data.title || ""),
     author: String(data.owner?.name || ""),
     description: String(data.desc || ""),
@@ -5684,6 +5968,7 @@ function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
   const fieldLines = {
     title: `title: "${escapeYaml(meta.title)}"`,
     url: `url: "${escapeYaml(cleanVideoUrl())}"`,
+    cover: `cover: "${escapeYaml(meta.coverPic || "")}"`,
     bvid: `bvid: "${escapeYaml(meta.bvid)}"`,
     cid: `cid: "${escapeYaml(meta.cid)}"`,
     author: `author: "${escapeYaml(meta.author || "unknown")}"`,
@@ -5706,8 +5991,13 @@ function getEnabledFrontmatterFields(settings) {
   const defaultFields = Array.isArray(DEFAULT_SETTINGS.frontmatterFields)
     ? DEFAULT_SETTINGS.frontmatterFields
     : [];
-  const raw = Array.isArray(settings?.frontmatterFields) ? settings.frontmatterFields : defaultFields;
+  const raw = Array.isArray(settings?.frontmatterFields) ? settings.frontmatterFields.slice() : defaultFields.slice();
   const allowed = new Set(defaultFields);
+  // 旧配置迁移：存储里还没有 cover 字段时，自动插到 bvid 后面，老用户不用手动改设置
+  if (allowed.has("cover") && !raw.includes("cover")) {
+    const at = raw.indexOf("bvid");
+    raw.splice(at >= 0 ? at + 1 : raw.length, 0, "cover");
+  }
   const unique = [];
   raw.forEach((item) => {
     const key = String(item || "").trim();

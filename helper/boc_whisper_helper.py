@@ -29,11 +29,13 @@
 """
 
 import argparse
+import ctypes
 import json
 import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -99,6 +101,8 @@ CONFIG = {
 JOBS = {}
 JOB_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
+
+LAST_ACTIVITY = time.time()   # 最后一次收到请求的时间，供空闲自退判断
 
 TEMP_PREFIX = "boc-whisper-"
 ACTIVE_WORKDIRS = set()   # 本进程创建、尚未清理的临时目录
@@ -262,10 +266,91 @@ def start_janitor():
     return thread
 
 
+def launchd_socket_fds(name="Listener"):
+    """从 launchd 取按需启动的监听 fd；不是 launchd 拉起时返回空列表。"""
+    try:
+        lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        activate = lib.launch_activate_socket
+    except (OSError, AttributeError):
+        return []
+    activate.restype = ctypes.c_int
+    activate.argtypes = [ctypes.c_char_p,
+                         ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+                         ctypes.POINTER(ctypes.c_size_t)]
+    fds = ctypes.POINTER(ctypes.c_int)()
+    count = ctypes.c_size_t(0)
+    if activate(name.encode(), ctypes.byref(fds), ctypes.byref(count)) != 0:
+        return []
+    result = [fds[i] for i in range(count.value)]
+    try:  # fd 数组由 launchd 分配，调用方释放
+        lib.free.argtypes = [ctypes.c_void_p]
+        lib.free(ctypes.cast(fds, ctypes.c_void_p))
+    except (AttributeError, TypeError):
+        pass
+    return result
+
+
+def inherited_listen_socket():
+    """launchd 按需拉起时用它的监听 socket；手动运行时返回 None。"""
+    for fd in launchd_socket_fds():
+        try:
+            sock = socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM)
+        except OSError:
+            sock = None
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if sock is not None:
+            return sock
+    return None
+
+
+def start_idle_watchdog(server, timeout):
+    """长时间没有请求、也没有在跑的任务就退出，下次请求由 launchd 重新拉起。"""
+    if timeout <= 0:
+        return None
+
+    def loop():
+        while True:
+            time.sleep(15)
+            idle_for = time.time() - LAST_ACTIVITY
+            if idle_for < timeout:
+                continue
+            with JOB_LOCK:
+                busy = any(job.get("status") == "running" for job in JOBS.values())
+            if busy:
+                continue
+            log(f"空闲 {timeout} 秒，退出（下次请求由 launchd 自动拉起）")
+            cleanup_all()
+            threading.Thread(target=server.shutdown, daemon=True).start()
+            return
+
+    thread = threading.Thread(target=loop, daemon=True, name="boc-idle")
+    thread.start()
+    return thread
+
+
 # ---------------------------------------------------------------- 工具
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+LOG_PATH = os.path.expanduser("~/Library/Logs/boc-whisper-helper.log")
+
+
+def redirect_stdio_to_log():
+    """launchd 把监听 socket 放在 stdout 上，print 会写进 socket 搅乱响应；改写到日志文件。"""
+    try:
+        fd = os.open(LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    except OSError:
+        return
+    os.dup2(fd, 1)
+    os.dup2(fd, 2)
+    if fd > 2:
+        os.close(fd)
 
 
 def expand(path):
@@ -701,7 +786,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = f"BOCWhisperHelper/{VERSION}"
 
     def log_message(self, fmt, *args):  # 静音默认访问日志
-        pass
+        global LAST_ACTIVITY
+        LAST_ACTIVITY = time.time()
 
     def _send(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -821,6 +907,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # launchd 按需拉起时 socket 占着 stdout，先抢在打印之前接管
+    inherited = inherited_listen_socket()
+    if inherited:
+        redirect_stdio_to_log()
+
     parser = argparse.ArgumentParser(description="BOC 字幕助手服务")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8788)
@@ -839,6 +930,8 @@ def main():
                         help="whisper 束搜索宽度，1 为贪心解码（默认，最快）")
     parser.add_argument("--best-of", type=int, default=CONFIG["best_of"],
                         help="候选采样数，1 表示不做额外采样（默认）")
+    parser.add_argument("--idle-timeout", type=int, default=300,
+                        help="空闲多少秒后自动退出，0 为常驻（默认 300）")
     args = parser.parse_args()
 
     CONFIG.update({
@@ -881,14 +974,24 @@ def main():
         # 交给主循环退出
         threading.Thread(target=server.shutdown, daemon=True).start()
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    if inherited:
+        server = ThreadingHTTPServer((args.host, args.port), Handler, bind_and_activate=False)
+        server.socket.close()
+        server.socket = inherited
+        server.server_address = inherited.getsockname()[:2]
+    else:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             signal.signal(sig, on_signal)
         except (ValueError, OSError):
             pass
 
-    log(f"监听 http://{args.host}:{args.port}")
+    host, port = server.server_address[:2]
+    log(f"监听 http://{host}:{port}" + ("（launchd 传入的 socket，按需启动）" if inherited else ""))
+    if args.idle_timeout > 0:
+        log(f"  空闲退出: {args.idle_timeout} 秒无请求且无任务时自动退出")
+    start_idle_watchdog(server, args.idle_timeout)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

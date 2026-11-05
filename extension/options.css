@@ -741,3 +741,29 @@ ol {
     grid-column: 1 / -1;
   }
 }
+
+.target-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.target-picker select,
+.target-picker input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.target-picker .add-property-btn {
+  flex: 0 0 auto;
+}
+
+#targetSubfolders {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}

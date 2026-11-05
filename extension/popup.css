@@ -488,4 +488,110 @@ button:disabled {
   display: none;
 }
 
+/* ---------- 写入目标 ---------- */
 
+.target-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.target-label {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--text-faint);
+}
+
+.target-row select {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 20px 0 8px;
+  background-color: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-faint) 50%),
+    linear-gradient(135deg, var(--text-faint) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 11px, calc(100% - 9px) 11px;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.target-row select:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.target-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.target-row select:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.target-row select option {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.target-row select[hidden] {
+  display: none;
+}
+
+/* ---------- 保存按钮（主 + 分屏图标） ---------- */
+
+.send-row {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.send-row .send {
+  flex: 1 1 auto;
+}
+
+button.send-split {
+  flex: 0 0 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+button.send-split:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text);
+}
+
+button.send-split:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.folder-info {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}

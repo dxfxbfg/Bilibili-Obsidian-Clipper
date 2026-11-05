@@ -11,22 +11,30 @@
     <string>/Users/mac/项目/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py</string>
     <string>--port</string>
     <string>8788</string>
+    <string>--idle-timeout</string>
+    <string>300</string>
   </array>
 
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
+  <!-- 不常驻：端口由 launchd 持有，扩展发起请求时才拉起进程，空闲 5 分钟自己退出 -->
+  <key>Sockets</key>
+  <dict>
+    <key>Listener</key>
+    <dict>
+      <key>SockNodeName</key>
+      <string>127.0.0.1</string>
+      <key>SockServiceName</key>
+      <string>8788</string>
+      <key>SockType</key>
+      <string>stream</string>
+      <key>SockFamily</key>
+      <string>IPv4</string>
+    </dict>
+  </dict>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
-
-  <key>StandardOutPath</key>
-  <string>/Users/mac/Library/Logs/boc-whisper-helper.log</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/mac/Library/Logs/boc-whisper-helper.log</string>
 </dict>
 </plist>

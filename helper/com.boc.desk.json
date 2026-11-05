@@ -1,0 +1,9 @@
+{
+  "name": "com.boc.desk",
+  "description": "BOC 桌面助手启动器（按需拉起，空闲自退）",
+  "path": "C:\\obsidian同步文件夹\\项目\\Bilibili-Obsidian-Clipper\\helper\\boc_native_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://kcflcnaacncmnhifegmgmfhkmjndjlcc/"
+  ]
+}

@@ -10,6 +10,10 @@ const el = {
   copyBtn: document.getElementById("copyBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   sendBtn: document.getElementById("sendBtn"),
+  splitBtn: document.getElementById("splitBtn"),
+  targetSelect: document.getElementById("targetSelect"),
+  subfolderSelect: document.getElementById("subfolderSelect"),
+  folderInfo: document.getElementById("folderInfo"),
   whisperBtn: document.getElementById("whisperBtn"),
   readingViewBtn: document.getElementById("readingViewBtn"),
   aiBtn: document.getElementById("aiBtn"),
@@ -50,7 +54,10 @@ init().catch((error) => {
 
 async function init() {
   bindEvents();
-  applyPanelVisibility(await getSettingsFromRuntime());
+  const initialSettings = await getSettingsFromRuntime();
+  applyPanelVisibility(initialSettings);
+  renderTargetSelects(initialSettings);
+  refreshFolderInfo();
 
   // 内容脚本如果已经抓过当前视频，先把结果直接画出来，不再白等一次
   // 完整的网络往返（视频信息 + 字幕列表 + 字幕内容）。
@@ -153,15 +160,22 @@ function bindEvents() {
     setMessage(`已下载 ${format.toUpperCase()}。`);
   });
 
-  el.sendBtn.addEventListener("click", async () => {
-    setStatus("正在发送到 Obsidian...");
-    const resp = await sendToContent({ type: "popup-send-obsidian" });
-    if (!resp?.ok) {
-      setStatus(`发送失败：${resp?.error || "未知错误"}`, true);
-      setMessage(`发送失败：${resp?.error || "未知错误"}`);
-    }
-    render(resp?.payload || latestPayload);
+  el.sendBtn.addEventListener("click", () => sendToObsidian(false));
+
+  el.targetSelect?.addEventListener("change", async () => {
+    localStorage.setItem("boc_popup_target", el.targetSelect.value);
+    const settings = await getSettingsFromRuntime();
+    const target = (settings?.obsidianTargets || []).find((item) => item.id === el.targetSelect.value);
+    renderSubfolderSelect(target);
+    refreshFolderInfo();
   });
+
+  el.subfolderSelect?.addEventListener("change", () => {
+    localStorage.setItem(subfolderKey(el.targetSelect.value), el.subfolderSelect.value);
+    refreshFolderInfo();
+  });
+
+  el.splitBtn?.addEventListener("click", () => sendToObsidian(true));
 
   el.whisperBtn?.addEventListener("click", () => {
     const output = String(latestPayload?.whisperOutput || el.subtitleSelect?.value || "bilingual");
@@ -730,4 +744,103 @@ async function getSettingsFromRuntime() {
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+function subfolderKey(targetId) {
+  return "boc_popup_subfolder_" + (targetId || "default");
+}
+
+function renderTargetSelects(settings) {
+  const targets = Array.isArray(settings?.obsidianTargets) ? settings.obsidianTargets : [];
+  if (!el.targetSelect) return;
+  const wanted = localStorage.getItem("boc_popup_target") || settings?.activeTargetId || "";
+  const active = targets.find((item) => item.id === wanted) || targets[0] || null;
+
+  if (!targets.length) {
+    el.targetSelect.innerHTML = '<option value="">未配置仓库</option>';
+    el.targetSelect.disabled = true;
+  } else {
+    el.targetSelect.innerHTML = targets
+      .map((item) => `<option value="${item.id}">${item.name || "仓库"}</option>`)
+      .join("");
+    el.targetSelect.value = active?.id || "";
+    el.targetSelect.disabled = targets.length <= 1;
+  }
+  renderSubfolderSelect(active);
+}
+
+function renderSubfolderSelect(target) {
+  if (!el.subfolderSelect) return;
+  const list = Array.isArray(target?.subfolders) ? target.subfolders.filter(Boolean) : [];
+  if (!list.length) {
+    el.subfolderSelect.hidden = true;
+    el.subfolderSelect.innerHTML = "";
+    // 子目录清空后别留着上次的选择，否则会一直往旧目录写
+    if (localStorage.getItem(subfolderKey(target?.id))) localStorage.removeItem(subfolderKey(target?.id));
+    return;
+  }
+  el.subfolderSelect.innerHTML = [
+    // 第一项是「不选」，落回设置页的笔记目录；以前默认挑第一个子目录，笔记目录等于被架空了
+    `<option value="">默认目录（${target?.folder || ""}）</option>`,
+    ...list.map((folder) => {
+      // 下拉窄，长路径放不下：在读/<科目>/材料/参考 这类取科目那段，完整路径放 title
+      const parts = String(folder).split("/").filter(Boolean);
+      const label = parts.length >= 3 ? parts[1] : parts.join("/");
+      return `<option value="${folder}" title="${folder}">${label}</option>`;
+    })
+  ].join("");
+  const saved = localStorage.getItem(subfolderKey(target.id)) || "";
+  el.subfolderSelect.value = list.includes(saved) ? saved : "";
+  el.subfolderSelect.hidden = false;
+}
+
+// 目标目录里已经有多少篇——像材料笔记的「本组」，动手前先看清这组里有什么
+async function refreshFolderInfo() {
+  if (!el.folderInfo) return;
+  el.folderInfo.textContent = "";
+  const settings = await getSettingsFromRuntime();
+  const targets = Array.isArray(settings?.obsidianTargets) ? settings.obsidianTargets : [];
+  const target = targets.find((item) => item.id === (el.targetSelect?.value || "")) || targets[0];
+  if (!target || !target.baseUrl || !target.apiKey) return;
+
+  const folder =
+    (el.subfolderSelect && !el.subfolderSelect.hidden ? el.subfolderSelect.value : "") || target.folder || "";
+  if (!folder) return;
+
+  const base = String(target.baseUrl).replace(/\/+$/, "");
+  const encoded = folder
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/");
+  try {
+    const response = await fetch(`${base}/vault/${encoded}/`, {
+      headers: { Authorization: `Bearer ${target.apiKey}`, Accept: "application/json" },
+      cache: "no-store"
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const count = (data.files || []).filter((name) => String(name).endsWith(".md")).length;
+    el.folderInfo.textContent = count ? `${count} 篇` : "空";
+  } catch (error) {
+    el.folderInfo.textContent = "";
+  }
+}
+
+async function sendToObsidian(split) {
+  setStatus(split ? "正在保存并并排..." : "正在发送到 Obsidian...");
+  const resp = await sendToContent({
+    type: "popup-send-obsidian",
+    split: Boolean(split),
+    targetId: el.targetSelect?.value || "",
+    subfolder: el.subfolderSelect && !el.subfolderSelect.hidden ? el.subfolderSelect.value : ""
+  });
+  if (!resp?.ok) {
+    const text = `失败：${resp?.error || "未知错误"}`;
+    setStatus(text, true);
+    setMessage(text);
+  } else {
+    setMessage(split ? "已保存并并排。" : "已保存到 Obsidian。");
+  }
+  render(resp?.payload || latestPayload);
 }

@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS = {
   noteFolder: "Clippings/Bilibili",
   obsidianApiBaseUrl: "http://127.0.0.1:27123",
   obsidianApiKey: "",
+  obsidianTargets: [],
+  activeTargetId: "",
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
@@ -90,9 +92,18 @@ const AI_PRESETS = [
 ];
 
 const elements = {
+  obsidianTarget: document.getElementById("obsidianTarget"),
+  targetName: document.getElementById("targetName"),
+  addTargetBtn: document.getElementById("addTargetBtn"),
+  removeTargetBtn: document.getElementById("removeTargetBtn"),
   noteFolder: document.getElementById("noteFolder"),
+  targetSubfolders: document.getElementById("targetSubfolders"),
   obsidianApiBaseUrl: document.getElementById("obsidianApiBaseUrl"),
   obsidianApiKey: document.getElementById("obsidianApiKey"),
+  panelShowCopy: document.getElementById("panelShowCopy"),
+  panelShowDownload: document.getElementById("panelShowDownload"),
+  deskHelperUrl: document.getElementById("deskHelperUrl"),
+  deskLayout: document.getElementById("deskLayout"),
   tags: document.getElementById("tags"),
   downloadFormat: document.getElementById("downloadFormat"),
   includeDateInFilename: document.getElementById("includeDateInFilename"),
@@ -144,6 +155,36 @@ function init() {
   elements.addFixedPropertyBtn.addEventListener("click", () => addFixedPropertyRow());
   elements.addNoteSectionBtn.addEventListener("click", () => addNoteSectionRow());
   elements.addAiProviderBtn.addEventListener("click", () => addAiProviderRow());
+
+  elements.obsidianTarget?.addEventListener("change", () => {
+    commitTargetFields();
+    activeTargetId = elements.obsidianTarget.value;
+    fillTargetFields(currentTarget());
+    setStatus("已切换仓库，点保存后剪藏才会写到这个仓库");
+  });
+
+  elements.addTargetBtn?.addEventListener("click", () => {
+    commitTargetFields();
+    const target = normalizeTarget({ name: "仓库 " + (obsidianTargets.length + 1) }, obsidianTargets.length);
+    obsidianTargets.push(target);
+    activeTargetId = target.id;
+    renderTargetSelect();
+    fillTargetFields(target);
+    elements.targetName.focus();
+  });
+
+  elements.removeTargetBtn?.addEventListener("click", () => {
+    if (obsidianTargets.length <= 1) {
+      setStatus("至少保留一个仓库", true);
+      return;
+    }
+    const index = obsidianTargets.findIndex((item) => item.id === activeTargetId);
+    obsidianTargets.splice(index, 1);
+    activeTargetId = obsidianTargets[Math.max(0, index - 1)].id;
+    renderTargetSelect();
+    fillTargetFields(currentTarget());
+    setStatus("已删除当前仓库，记得点保存");
+  });
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element) || !event.target.closest(".fixed-property-type-picker")) {
       closeAllFixedPropertyMenus();
@@ -156,9 +197,29 @@ function init() {
 
 async function loadSettings() {
   const settings = await getSettings();
-  elements.noteFolder.value = settings.noteFolder || "";
-  elements.obsidianApiBaseUrl.value = settings.obsidianApiBaseUrl || "";
-  elements.obsidianApiKey.value = settings.obsidianApiKey || "";
+  const saved = Array.isArray(settings.obsidianTargets) ? settings.obsidianTargets : [];
+  obsidianTargets = saved.length
+    ? saved.map(normalizeTarget)
+    : [
+        normalizeTarget(
+          {
+            name: "主库",
+            baseUrl: settings.obsidianApiBaseUrl,
+            apiKey: settings.obsidianApiKey,
+            folder: settings.noteFolder
+          },
+          0
+        )
+      ];
+  activeTargetId = obsidianTargets.some((item) => item.id === settings.activeTargetId)
+    ? settings.activeTargetId
+    : obsidianTargets[0].id;
+  renderTargetSelect();
+  fillTargetFields(currentTarget());
+  elements.panelShowCopy.checked = settings.panelShowCopy !== false;
+  elements.panelShowDownload.checked = settings.panelShowDownload !== false;
+  elements.deskHelperUrl.value = settings.deskHelperUrl || "http://127.0.0.1:8789";
+  elements.deskLayout.value = settings.deskLayout === "left" ? "left" : "right";
   elements.tags.value = settings.tags || "";
   elements.downloadFormat.value = normalizeDownloadFormat(settings.downloadFormat);
   elements.includeDateInFilename.checked = settings.includeDateInFilename !== false;
@@ -279,20 +340,94 @@ function normalizeHelperUrl(value) {
   return url || DEFAULT_SETTINGS.whisperHelperUrl;
 }
 
+let obsidianTargets = [];
+let activeTargetId = "";
+
+function makeTargetId() {
+  return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function normalizeTarget(raw, index) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    id: String(source.id || makeTargetId()),
+    name: String(source.name || "").trim() || "仓库 " + (index + 1),
+    baseUrl: normalizeBaseUrl(source.baseUrl || DEFAULT_SETTINGS.obsidianApiBaseUrl),
+    apiKey: normalizeApiKey(source.apiKey || ""),
+    folder: String(source.folder || DEFAULT_SETTINGS.noteFolder).trim(),
+    // 二级目录只在 targets.local.json 里维护，设置页保存时要原样带回去
+    subfolders: Array.isArray(source.subfolders) ? source.subfolders.filter(Boolean) : []
+  };
+}
+
+function currentTarget() {
+  return obsidianTargets.find((item) => item.id === activeTargetId) || obsidianTargets[0] || null;
+}
+
+function renderTargetSelect() {
+  if (!elements.obsidianTarget) return;
+  elements.obsidianTarget.innerHTML = "";
+  obsidianTargets.forEach((target) => {
+    const option = document.createElement("option");
+    option.value = target.id;
+    option.textContent = target.name + (target.baseUrl ? " · " + target.baseUrl.replace(/^https?:\/\//, "") : "");
+    elements.obsidianTarget.appendChild(option);
+  });
+  if (activeTargetId) {
+    elements.obsidianTarget.value = activeTargetId;
+  }
+}
+
+function fillTargetFields(target) {
+  if (!target) return;
+  elements.targetName.value = target.name || "";
+  elements.noteFolder.value = target.folder || "";
+  if (elements.targetSubfolders) {
+    elements.targetSubfolders.value = (Array.isArray(target.subfolders) ? target.subfolders : []).join("\n");
+  }
+  elements.obsidianApiBaseUrl.value = target.baseUrl || "";
+  elements.obsidianApiKey.value = target.apiKey || "";
+}
+
+// 把表单里改过的三项写回当前仓库，切换仓库或保存前都要先调一次
+function commitTargetFields() {
+  const target = currentTarget();
+  if (!target) return;
+  const name = String(elements.targetName.value || "").trim();
+  if (name) target.name = name;
+  target.folder = String(elements.noteFolder.value || "").trim();
+  if (elements.targetSubfolders) {
+    // 一行一个目录，去掉空行和重复，路径里的斜杠统一
+    const seen = new Set();
+    target.subfolders = String(elements.targetSubfolders.value || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim().replace(/^\/+|\/+$/g, ""))
+      .filter((line) => line && !seen.has(line) && seen.add(line));
+  }
+  target.baseUrl = normalizeBaseUrl(elements.obsidianApiBaseUrl.value);
+  target.apiKey = normalizeApiKey(elements.obsidianApiKey.value);
+}
+
 function collectFormPayload() {
   const selectedFields = Array.from(elements.frontmatterFields)
     .filter((checkbox) => checkbox.checked)
     .map((checkbox) => checkbox.value);
 
-  const normalizedBaseUrl = normalizeBaseUrl(elements.obsidianApiBaseUrl.value);
-  const normalizedApiKey = normalizeApiKey(elements.obsidianApiKey.value);
-  elements.obsidianApiBaseUrl.value = normalizedBaseUrl;
-  elements.obsidianApiKey.value = normalizedApiKey;
+  commitTargetFields();
+  const activeTarget = currentTarget() || normalizeTarget({}, 0);
+  elements.obsidianApiBaseUrl.value = activeTarget.baseUrl;
+  elements.obsidianApiKey.value = activeTarget.apiKey;
 
   return {
-    noteFolder: elements.noteFolder.value.trim(),
-    obsidianApiBaseUrl: normalizedBaseUrl,
-    obsidianApiKey: normalizedApiKey,
+    noteFolder: activeTarget.folder,
+    obsidianApiBaseUrl: activeTarget.baseUrl,
+    obsidianApiKey: activeTarget.apiKey,
+    obsidianTargets: obsidianTargets.map((item) => ({ ...item })),
+    activeTargetId: activeTarget.id,
+    panelShowCopy: elements.panelShowCopy.checked,
+    panelShowDownload: elements.panelShowDownload.checked,
+    deskHelperUrl: String(elements.deskHelperUrl.value || "").trim() || "http://127.0.0.1:8789",
+    deskLayout: elements.deskLayout.value === "left" ? "left" : "right",
     tags: elements.tags.value.trim(),
     downloadFormat: normalizeDownloadFormat(elements.downloadFormat.value),
     includeDateInFilename: elements.includeDateInFilename.checked,

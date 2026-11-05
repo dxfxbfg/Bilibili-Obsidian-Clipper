@@ -48,7 +48,7 @@ python3 helper/boc_whisper_helper.py
 
 可配置项：是否显示生成按钮、助手地址、默认输出语言、源语言、whisper 模型路径。
 
-细节、接口说明和开机自启配置见 [helper/README.md](helper/README.md)。
+细节、接口说明和开机自启配置见 [helper/README.md](Archive%20Projects/Bilibili-Obsidian-Clipper/helper/README.md)。
 
 ### 阅读视图（v1.0.18+）
 
@@ -64,9 +64,9 @@ python3 helper/boc_whisper_helper.py
 
 ## 功能图片演示
 
-![Bilibili Obsidian Clipper 功能演示](docs/images/feature-demo-v2.png)
+![Bilibili Obsidian Clipper 功能演示](feature-demo-v2.png)
 
-![Bilibili Obsidian Clipper AI 侧边栏演示](docs/images/33.png)
+![Bilibili Obsidian Clipper AI 侧边栏演示](33.png)
 
 ## 安装方式
 

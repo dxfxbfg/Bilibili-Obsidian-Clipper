@@ -48,8 +48,23 @@
         <button id="readingViewBtn" type="button">阅读</button>
       </div>
 
+      <div class="target-row">
+        <span class="target-label">写入</span>
+        <select id="targetSelect"></select>
+        <select id="subfolderSelect" hidden></select>
+        <span id="folderInfo" class="folder-info"></span>
+      </div>
+
       <button id="whisperBtn" type="button" class="whisper" hidden>生成字幕</button>
-      <button id="sendBtn" type="button" class="send">保存到 Obsidian</button>
+      <div class="send-row">
+        <button id="sendBtn" type="button" class="send">保存到 Obsidian</button>
+        <button id="splitBtn" type="button" class="send-split" title="保存并并排" aria-label="保存并并排">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <rect x="3.2" y="4.6" width="7.4" height="14.8" rx="2.2"></rect>
+            <rect x="13.4" y="4.6" width="7.4" height="14.8" rx="2.2"></rect>
+          </svg>
+        </button>
+      </div>
       <p id="message" class="message"></p>
     </main>
 

@@ -34,49 +34,33 @@ curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin \
 
 ## 启动
 
-手动跑：
+手动跑（路径是相对项目根的，别在家目录直接敲）：
 
 ```bash
-python3 helper/boc_whisper_helper.py
+python3 /Users/mac/项目/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py
 ```
 
-**推荐：注册成 LaunchAgent（开机自启 + 崩溃自动拉起，本项目已配置）**
+**推荐：装成 LaunchAgent，按需启动（本项目已配置）**
+
+launchd 一直持有 8788 端口，但背后不常驻进程：扩展发起请求时才把助手拉起来；没有请求、也没有在跑的任务超过 `--idle-timeout` 秒（默认 300）后，进程自己退出，内存归零。
 
 ```bash
-cat > ~/Library/LaunchAgents/com.knight.boc-whisper-helper.plist <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key><string>com.knight.boc-whisper-helper</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>/usr/bin/python3</string>
-		<string>/Users/mac/项目/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py</string>
-	</array>
-	<key>RunAtLoad</key><true/>
-	<key>KeepAlive</key><true/>
-	<key>ThrottleInterval</key><integer>10</integer>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<!-- PATH 必须包含 /opt/homebrew/bin，否则找不到 whisper-cli 和 ffmpeg -->
-		<key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-	</dict>
-	<key>StandardOutPath</key><string>/Users/mac/Library/Logs/boc-whisper-helper.log</string>
-	<key>StandardErrorPath</key><string>/Users/mac/Library/Logs/boc-whisper-helper.log</string>
-</dict>
-</plist>
-PLIST
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.knight.boc-whisper-helper.plist
-curl -s http://127.0.0.1:8788/health
+cp helper/com.boc.whisper-helper.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.boc.whisper-helper.plist
+curl -s http://127.0.0.1:8788/health      # 这一下会把进程拉起来
 ```
 
-两个坑：① PATH 里没有 `/opt/homebrew/bin` 时 whisper-cli/ffmpeg 找不到（health 里 whisper/ffmpeg 为 false）；② 改完 plist 后 `launchctl kickstart -k` 不会重读文件，要 `bootout` + `bootstrap`。日志在 `~/Library/Logs/boc-whisper-helper.log`。
+plist 里关键是 `Sockets` 段：监听 socket 由 launchd 创建并持有，进程启动后通过 `launch_activate_socket` 把它取过来用，所以端口上随时有人应门，冷启动只多几百毫秒。**不要加 `KeepAlive`**，否则空闲自退后会被立刻重启，等于白退。
+
+看是否在跑：`launchctl print gui/$(id -u)/com.boc.whisper-helper | grep state`。日志在 `~/Library/Logs/boc-whisper-helper.log`。
+
+两个坑：① PATH 里没有 `/opt/homebrew/bin` 时 whisper-cli/ffmpeg 找不到（health 里 whisper/ffmpeg 为 false）；② 改完 plist 后 `launchctl kickstart -k` 不会重读文件，要 `bootout` + `bootstrap`。
 
 常用参数：
 
 ```
 --port 8788              监听端口，默认 8788
+--idle-timeout 300       空闲多少秒后退出，0 为常驻（默认 300）
 --model <路径>           指定模型，默认自动探测
 --output bilingual       默认输出：bilingual / translated / original
 --threads 8              whisper 线程数，默认取 CPU 核数
@@ -121,21 +105,14 @@ curl -L -o ~/.cache/whisper.cpp/ggml-base.en-q5_1.bin \
 
 启动后访问 <http://127.0.0.1:8788/health> 应看到依赖状态。
 
-### 开机自启（macOS）
+### 停用 / 恢复
 
 ```bash
-cp helper/com.boc.whisper-helper.plist ~/Library/LaunchAgents/
+launchctl bootout gui/$(id -u)/com.boc.whisper-helper      # 停用，端口一并释放
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.boc.whisper-helper.plist
 ```
 
-停用 / 恢复：
-
-```bash
-launchctl bootout gui/$(id -u)/com.boc.whisper-helper
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.boc.whisper-helper.plist
-```
-
-日志在 `~/Library/Logs/boc-whisper-helper.log`。**plist 里的路径是本机绝对路径，换机器要改。**
+plist 里的路径是本机绝对路径，换机器要改。
 
 ## 接口
 
