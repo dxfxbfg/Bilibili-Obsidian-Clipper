@@ -149,8 +149,13 @@
         <h2>无字幕视频：生成字幕</h2>
         <p class="hint">
           视频没有字幕轨时，调用本机的字幕助手服务：取音频 → whisper 转写 → 可选翻译。
-          需要先启动 <code>helper/boc_whisper_helper.py</code>，详见仓库 helper/README.md。
+          首次使用安装本地启动器，之后会自动启动助手，按 GPU、显存和内存选择、下载并加载多语言模型。有可用显卡时优先 GPU，失败时回退 CPU。
+          Windows x64 可自动安装转写依赖；其他平台需先安装 whisper-cli 和 FFmpeg。
         </p>
+        <p class="hint">安装 Python 3.10+ 后，在下载解压的项目目录执行以下命令（Edge 请将 chrome 改为 edge）：</p>
+        <pre><code id="nativeInstallCommand"></code></pre>
+        <button id="setupWhisperBtn" class="secondary-btn" type="button">自动配置字幕助手与模型</button>
+        <p id="whisperSetupStatus" class="hint" role="status" aria-live="polite">首次配置会下载依赖和约 31–182 MB 的模型；后续复用本机缓存。也可直接点击视频页的生成字幕按钮。</p>
         <label class="checkbox">
           <input id="enableWhisperFallback" type="checkbox" />
           无字幕时显示「生成字幕」按钮
@@ -175,8 +180,8 @@
           <option value="ko">韩语 ko</option>
         </select>
 
-        <label for="whisperModel">whisper 模型路径（留空用助手默认）</label>
-        <input id="whisperModel" type="text" placeholder="留空即可，例如：~/.cache/whisper.cpp/ggml-small.en.bin" />
+        <label for="whisperModel">whisper 模型路径（留空按电脑配置自动选择）</label>
+        <input id="whisperModel" type="text" placeholder="留空自动下载，或填写已有模型的完整路径" />
       </section>
 
       <section class="field-group">

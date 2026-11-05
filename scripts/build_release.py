@@ -10,6 +10,17 @@ EXTENSION_DIR = ROOT / "extension"
 RELEASE_DIR = ROOT / "release"
 MANIFEST_PATH = EXTENSION_DIR / "manifest.json"
 PACKAGE_NAME = "bilibili-obsidian-clipper"
+LOCAL_ONLY_FILES = {"targets.local.json"}
+
+
+def ignore_local_files(directory, names):
+    """Local presets may contain API keys; never ship them in release archives."""
+    return [name for name in names if (
+        name in LOCAL_ONLY_FILES
+        or name.startswith(".env")
+        or name in {"__pycache__", ".DS_Store"}
+        or name.endswith((".pyc", ".pyo"))
+    )]
 
 
 def load_manifest():
@@ -27,7 +38,7 @@ def dump_manifest(path: Path, data: dict):
 def prepare_release_dir(path: Path):
     if path.exists():
         shutil.rmtree(path)
-    shutil.copytree(EXTENSION_DIR, path)
+    shutil.copytree(EXTENSION_DIR, path, ignore=ignore_local_files)
 
 
 def disable_firefox_player_ai_quick_action(release_folder: Path):
@@ -82,7 +93,7 @@ def build_variant(manifest: dict, browser: str, version: str):
         }
         background = variant_manifest.setdefault("background", {})
         background.pop("service_worker", None)
-        background["scripts"] = ["background.js"]
+        background["scripts"] = ["ai/sse.js", "whisper-helper.js", "background.js"]
         disable_firefox_player_ai_quick_action(release_folder)
     else:
         raise ValueError(f"Unsupported browser: {browser}")
@@ -113,11 +124,24 @@ def main():
         build_variant(manifest, "chrome", version),
         build_variant(manifest, "firefox", version),
     ]
+    helper_zip = build_helper_package(version)
 
     print(f"Built release packages for v{version}:")
     for folder, zip_path in built:
         print(f"- dir: {folder}")
         print(f"  zip: {zip_path}")
+    print(f"- helper: {helper_zip}")
+
+
+def build_helper_package(version):
+    archive_path = RELEASE_DIR / f"{PACKAGE_NAME}-v{version}-helper.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted((ROOT / "helper").iterdir()):
+            if path.is_file() and (path.suffix in (".py", ".bat", ".json", ".plist") or path.name == "README.md"):
+                archive.write(path, "helper/" + path.name)
+        archive.write(ROOT / "docs" / "auto-setup.md", "docs/auto-setup.md")
+        archive.write(ROOT / "LICENSE", "LICENSE")
+    return archive_path
 
 
 if __name__ == "__main__":

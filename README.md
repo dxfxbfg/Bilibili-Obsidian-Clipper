@@ -20,6 +20,8 @@
 
 ### 无字幕视频生成字幕
 
+Windows Chrome / Edge 现在支持自动启动、配置和下载模型，并优先使用可用 GPU。首次安装步骤见[字幕助手自动配置](docs/auto-setup.md)。设置页点击「自动配置字幕助手与模型」，或直接在视频页点击「生成字幕」；之后无需手动启动服务。新安装默认自动检测音频语言，已有语言设置会保留。
+
 视频没有字幕轨时，扩展会显示「生成字幕（whisper）」按钮，走本机助手服务：
 
 ```
@@ -31,7 +33,7 @@
 扩展轮询进度 → 拿回字幕后，走和普通字幕一样的预览 / 下载 / 写 Obsidian 流程
 ```
 
-浏览器扩展不能执行本地程序，所以转写这一步放在本机服务里。先装好依赖并启动：
+浏览器扩展不能直接执行本地程序，因此首次需安装本地启动器。Windows 自动配置会补齐依赖；macOS 或希望手动管理依赖的用户仍可按下面方式启动：
 
 ```bash
 brew install whisper-cpp ffmpeg
@@ -48,7 +50,7 @@ python3 helper/boc_whisper_helper.py
 
 可配置项：是否显示生成按钮、助手地址、默认输出语言、源语言、whisper 模型路径。
 
-细节、接口说明和开机自启配置见 [helper/README.md](Archive%20Projects/Bilibili-Obsidian-Clipper/helper/README.md)。
+细节、接口说明和开机自启配置见 [helper/README.md](helper/README.md)。
 
 ### 阅读视图（v1.0.18+）
 
@@ -64,9 +66,9 @@ python3 helper/boc_whisper_helper.py
 
 ## 功能图片演示
 
-![Bilibili Obsidian Clipper 功能演示](feature-demo-v2.png)
+![Bilibili Obsidian Clipper 功能演示](docs/images/feature-demo-v2.png)
 
-![Bilibili Obsidian Clipper AI 侧边栏演示](33.png)
+![Bilibili Obsidian Clipper AI 侧边栏演示](docs/images/33.png)
 
 ## 安装方式
 
@@ -96,6 +98,8 @@ python3 helper/boc_whisper_helper.py
 6. 选择解压后的文件夹中的 `manifest.json` 文件
 
 ## 项目结构
+
+开发者可先阅读[架构、数据流与验证说明](docs/architecture.md)。
 
 - `README.md` / `LICENSE`：项目说明与许可证
 - `extension/`：插件源码（manifest、js、css、icons）

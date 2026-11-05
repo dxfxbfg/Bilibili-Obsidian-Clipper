@@ -2,6 +2,8 @@
 
 给扩展补上「B 站视频没有字幕轨时生成字幕」的能力。
 
+Windows Chrome / Edge 用户建议先阅读[自动配置与 GPU 优先说明](../docs/auto-setup.md)。安装一次启动器后，由扩展按需启动助手、下载依赖和模型；以下手动启动方式仍适用于 macOS 和自行配置的环境。
+
 浏览器扩展跑在沙箱里，不能执行本地程序，所以 whisper 转写放在这个本地服务里做：
 
 ```
@@ -37,10 +39,12 @@ curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin \
 手动跑（路径是相对项目根的，别在家目录直接敲）：
 
 ```bash
-python3 /Users/mac/项目/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py
+python3 helper/boc_whisper_helper.py
 ```
 
-**推荐：装成 LaunchAgent，按需启动（本项目已配置）**
+**可选：装成 LaunchAgent，按需启动**
+
+安装前，先将 `com.boc.whisper-helper.plist` 中的 `/absolute/path/to/` 示例路径改为本机项目的实际绝对路径。
 
 launchd 一直持有 8788 端口，但背后不常驻进程：扩展发起请求时才把助手拉起来；没有请求、也没有在跑的任务超过 `--idle-timeout` 秒（默认 300）后，进程自己退出，内存归零。
 

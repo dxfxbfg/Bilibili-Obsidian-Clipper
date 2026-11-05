@@ -52,7 +52,7 @@ const DEFAULT_SETTINGS = {
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
   whisperOutputMode: "bilingual",
-  whisperLanguage: "en",
+  whisperLanguage: "auto",
   whisperModel: "",
   frontmatterFields: [
     "title",
@@ -148,6 +148,9 @@ let savedAiPresetPrompts = [];
 init();
 
 function init() {
+  document.getElementById("nativeInstallCommand").textContent =
+    `python helper/install_native_host.py --extension-id ${chrome.runtime.id} --browser chrome`;
+  document.getElementById("setupWhisperBtn").addEventListener("click", setupWhisperHelper);
   loadSettings();
   elements.saveBtn.addEventListener("click", saveSettings);
   elements.testConnectionBtn.addEventListener("click", testConnection);
@@ -245,7 +248,7 @@ async function loadSettings() {
   elements.enableWhisperFallback.checked = settings.enableWhisperFallback !== false;
   elements.whisperHelperUrl.value = settings.whisperHelperUrl || DEFAULT_SETTINGS.whisperHelperUrl;
   elements.whisperOutputMode.value = normalizeWhisperOutputMode(settings.whisperOutputMode);
-  elements.whisperLanguage.value = String(settings.whisperLanguage || "en");
+  elements.whisperLanguage.value = String(settings.whisperLanguage || "auto");
   elements.whisperModel.value = String(settings.whisperModel || "");
   const selectedFields = new Set(settings.frontmatterFields || DEFAULT_SETTINGS.frontmatterFields);
   elements.frontmatterFields.forEach((checkbox) => {
@@ -447,7 +450,7 @@ function collectFormPayload() {
     enableWhisperFallback: elements.enableWhisperFallback.checked,
     whisperHelperUrl: normalizeHelperUrl(elements.whisperHelperUrl.value),
     whisperOutputMode: normalizeWhisperOutputMode(elements.whisperOutputMode.value),
-    whisperLanguage: String(elements.whisperLanguage.value || "en"),
+    whisperLanguage: String(elements.whisperLanguage.value || "auto"),
     whisperModel: String(elements.whisperModel.value || "").trim(),
     frontmatterFields: selectedFields,
     fixedFrontmatterProperties: normalizeFixedFrontmatterProperties(collectFixedPropertyRows()),
@@ -1071,6 +1074,40 @@ function normalizeApiKey(value) {
   return String(value || "").trim().replace(/^Bearer\s+/i, "").trim();
 }
 
+
+async function setupWhisperHelper() {
+  const button = document.getElementById("setupWhisperBtn");
+  const status = document.getElementById("whisperSetupStatus");
+  button.disabled = true;
+  status.textContent = "正在启动字幕助手并检测电脑配置…";
+  const helperUrl = normalizeHelperUrl(elements.whisperHelperUrl.value);
+  try {
+    let response = await sendRuntimeMessage({ type: "whisper-helper-setup", helperUrl, start: true,
+      model: String(elements.whisperModel.value || "").trim() });
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (true) {
+      if (!response?.ok) throw new Error(response?.error || "助手没有返回配置状态");
+      const setup = response.setup || {};
+      status.textContent = setup.message || "正在准备…";
+      if (setup.status === "error") throw new Error(setup.error || setup.message);
+      if (setup.status === "done") {
+        const info = setup.runtime || {};
+        const hardware = info.hardware || {};
+        const gpu = (hardware.gpus || []).map((item) => item.name).join("、");
+        const backend = info.backend === "vulkan" ? `优先 GPU（${gpu}）` : "CPU";
+        status.textContent = `配置完成：${info.model_name || "自定义模型"}；${hardware.cpu_threads} 核逻辑 CPU / ${hardware.memory_gb} GB 内存；${backend}。生成字幕时自动加载。${info.fallback_reason || ""}`;
+        return;
+      }
+      if (Date.now() > deadline) throw new Error("等待配置超过 30 分钟，请检查网络后重试");
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      response = await sendRuntimeMessage({ type: "whisper-helper-setup", helperUrl });
+    }
+  } catch (error) {
+    status.textContent = `配置未完成：${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
 
 async function testWhisperHelper() {
   clearInputErrors();

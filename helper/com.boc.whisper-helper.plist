@@ -8,7 +8,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
-    <string>/Users/mac/项目/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py</string>
+    <string>/absolute/path/to/Bilibili-Obsidian-Clipper/helper/boc_whisper_helper.py</string>
     <string>--port</string>
     <string>8788</string>
     <string>--idle-timeout</string>

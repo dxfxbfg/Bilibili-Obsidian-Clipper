@@ -46,7 +46,16 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
-VERSION = "1.0.0"
+try:
+    from . import boc_runtime
+except ImportError:
+    import boc_runtime
+
+RUNTIME_INFO = {}
+SETUP_STATE = {"status": "idle", "message": "尚未配置"}
+SETUP_LOCK = threading.Lock()
+
+VERSION = "1.1.0"
 
 BILI_HEADERS = {
     "User-Agent": (
@@ -178,7 +187,7 @@ def build_cache_key(options):
     return "|".join([
         str(options.get("bvid") or ""),
         str(options.get("cid") or ""),
-        str(options.get("language") or "en"),
+        str(options.get("language") or "auto"),
         os.path.basename(model),
         output,
         target,
@@ -320,7 +329,7 @@ def start_idle_watchdog(server, timeout):
                 continue
             with JOB_LOCK:
                 busy = any(job.get("status") == "running" for job in JOBS.values())
-            if busy:
+            if busy or SETUP_STATE.get("status") == "running":
                 continue
             log(f"空闲 {timeout} 秒，退出（下次请求由 launchd 自动拉起）")
             cleanup_all()
@@ -365,11 +374,38 @@ def find_model(explicit=""):
         p = expand(CONFIG["model"])
         if os.path.isfile(p):
             return p
-    for cand in MODEL_CANDIDATES:
+    for cand in [RUNTIME_INFO.get("model", ""), *MODEL_CANDIDATES]:
         p = expand(cand)
         if os.path.isfile(p):
             return p
     return ""
+
+
+def prepare_runtime(model="", report=lambda stage, pct, text: None):
+    info = boc_runtime.ensure_runtime(CONFIG, model, report)
+    RUNTIME_INFO.update(info)
+    return info
+
+
+def start_setup(model=""):
+    with SETUP_LOCK:
+        if SETUP_STATE["status"] == "running":
+            return dict(SETUP_STATE)
+        SETUP_STATE.clear()
+        SETUP_STATE.update(status="running", message="正在检测电脑配置")
+    def worker():
+        def report(stage, pct, text):
+            with SETUP_LOCK:
+                SETUP_STATE.update(stage=stage, message=text, percent=pct)
+        try:
+            info = prepare_runtime(model, report)
+            with SETUP_LOCK:
+                SETUP_STATE.update(status="done", runtime=info)
+        except Exception as exc:
+            with SETUP_LOCK:
+                SETUP_STATE.update(status="error", error=str(exc), message=str(exc))
+    threading.Thread(target=worker, daemon=True, name="boc-setup").start()
+    return {"status": "running", "message": "正在检测电脑配置"}
 
 
 def which_ok(binary):
@@ -472,11 +508,14 @@ def transcribe(wav, model, language, threads, on_stage, duration=0, on_proc=None
     best = int(best_of if best_of is not None else CONFIG["best_of"])
     cmd = [CONFIG["whisper_bin"], "-m", model, "-f", wav, "-oj", "-of", out_prefix,
            "-t", str(threads), "-bs", str(beam), "-bo", str(best)]
-    if language and language != "auto":
-        cmd += ["-l", language]
+    # Omitting -l defaults whisper.cpp to English; auto must be explicit.
+    cmd += ["-l", language or "auto"]
+    if os.name == "nt":
+        cmd += ["--no-gpu"]  # this path is the deterministic CPU fallback
 
     on_stage("transcribe", 30, "正在转写音频")
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     if on_proc:
         on_proc(proc)
 
@@ -527,6 +566,29 @@ def transcribe(wav, model, language, threads, on_stage, duration=0, on_proc=None
         raise RuntimeError("转写结果为空")
     log(f"转写完成，{len(cues)} 段，用时 {total:.1f}s")
     return cues
+
+
+def transcribe_with_runtime(runtime, wav, model, language, threads, report, duration=0,
+                            on_proc=None, options=None, job=None):
+    options = options or {}
+    job = job if job is not None else {}
+    if runtime.get("gpu_server"):
+        try:
+            cues = boc_runtime.boc_gpu.transcribe(runtime["gpu_server"], wav, model, language, threads, report, on_proc)
+            job["backend"] = "vulkan"
+            RUNTIME_INFO["actual_backend"] = "vulkan"
+            return cues
+        except Exception as exc:
+            if job.get("_cancelled"):
+                raise
+            reason = str(exc)
+            job["fallback_reason"] = reason
+            RUNTIME_INFO.update(actual_backend="cpu", fallback_reason=reason)
+            report("fallback-cpu", 28, f"GPU 不可用，改用 CPU：{reason[:180]}")
+    job["backend"] = "cpu"
+    RUNTIME_INFO["actual_backend"] = "cpu"
+    return transcribe(wav, model, language, threads, report, duration, on_proc=on_proc,
+                      beam_size=options.get("beam_size"), best_of=options.get("best_of"))
 
 
 def srt_time_to_ms(value):
@@ -643,6 +705,8 @@ def run_job(job_id, options):
     ACTIVE_WORKDIRS.add(workdir)
 
     def on_stage(stage, percent, text):
+        if job.get("_cancelled"):
+            raise RuntimeError("任务已取消")
         job["stage"] = stage
         job["percent"] = percent
         job["message"] = text
@@ -653,28 +717,32 @@ def run_job(job_id, options):
 
     try:
         with RUN_LOCK:
+            if job.get("_cancelled"):
+                raise RuntimeError("任务已取消")
+            runtime = prepare_runtime(options.get("model", ""),
+                                      lambda stage, pct, text: on_stage(stage, 0, text))
             bvid = options["bvid"]
             cid = resolve_cid(bvid, options.get("cid", ""))
-            model = find_model(options.get("model", ""))
+            model = runtime["model"]
             if not model:
                 raise RuntimeError(
                     "找不到 whisper 模型。用 --model 指定，或放到 ~/.cache/whisper.cpp/ggml-base.en.bin。"
                     "下载：curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin "
                     "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
                 )
-            language = str(options.get("language") or "en")
+            language = str(options.get("language") or "auto")
             if language != "en" and model.endswith(".en.bin"):
                 raise RuntimeError(
                     f"模型 {os.path.basename(model)} 只支持英文，识别 {language} 请换多语言模型"
                     "（如 ggml-base.bin / ggml-small.bin）"
                 )
-            threads = int(options.get("threads") or CONFIG["threads"] or (os.cpu_count() or 4))
+            threads = int(options.get("threads") or CONFIG["threads"] or runtime["threads"])
 
             job["cid"] = cid
             job["model"] = os.path.basename(model)
             wav, duration = prepare_wav(workdir, bvid, cid, options.get("aid", ""), on_stage)
-            cues = transcribe(wav, model, language, threads, on_stage, duration, on_proc=on_proc,
-                              beam_size=options.get("beam_size"), best_of=options.get("best_of"))
+            cues = transcribe_with_runtime(runtime, wav, model, language, threads, on_stage, duration,
+                                           on_proc, options, job)
             cues = apply_text_fixes(merge_sentences(cues))
 
             # 语言即需求：output 不是 original 就要译文。
@@ -692,7 +760,7 @@ def run_job(job_id, options):
             for cue, translated in zip(cues, zh):
                 if output == "translated":
                     cue["content"] = translated or cue["text"]
-                elif output == "bilingual" and translated:
+                elif output == "bilingual" and translated and translated.strip() != cue["text"].strip():
                     cue["content"] = f"{translated}\n{cue['text']}"
                 else:
                     cue["content"] = cue["text"]
@@ -802,20 +870,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_json(self):
         length = int(self.headers.get("Content-Length") or 0)
+        if length < 0 or length > 1024 * 1024:
+            raise ValueError("请求体大小必须在 0–1 MB 之间")
         if not length:
             return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        return payload
 
     def do_OPTIONS(self):  # noqa: N802
         self._send(204, {})
 
     def do_GET(self):  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/setup":
+            with SETUP_LOCK:
+                state = dict(SETUP_STATE)
+            self._send(200, {"ok": True, "setup": state, "plan": boc_runtime.plan()})
+            return
         if path == "/health":
             model = find_model("")
             self._send(200, {
                 "ok": True,
                 "version": VERSION,
+                "service": "boc-whisper-helper",
+                "auto_setup": True,
+                "runtime": dict(RUNTIME_INFO),
                 "whisper": which_ok(CONFIG["whisper_bin"]),
                 "whisper_bin": CONFIG["whisper_bin"],
                 "ffmpeg": which_ok(CONFIG["ffmpeg_bin"]),
@@ -855,10 +936,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path
+        origin = self.headers.get("Origin", "")
+        if path in ("/setup", "/jobs", "/transcribe") and origin and not origin.startswith(("chrome-extension://", "moz-extension://")):
+            self._send(403, {"ok": False, "error": "仅接受扩展或本机客户端的配置与转写请求"})
+            return
         try:
             options = self._read_json()
         except Exception as exc:  # noqa: BLE001
             self._send(400, {"ok": False, "error": f"请求体不是合法 JSON：{exc}"})
+            return
+
+        if path == "/setup":
+            self._send(202, {"ok": True, "setup": start_setup(str(options.get("model") or ""))})
             return
 
         if path == "/jobs":

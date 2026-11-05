@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
   enableWhisperFallback: true,
   whisperHelperUrl: "http://127.0.0.1:8788",
   whisperOutputMode: "bilingual",
-  whisperLanguage: "en",
+  whisperLanguage: "auto",
   whisperModel: "",
   readerTheme: "light",
   readerFontScale: "m",
@@ -1766,7 +1766,7 @@ async function runWhisperGeneration(outputOverride) {
         bvid: state.bvid,
         cid: state.cid,
         aid: state.aid || "",
-        language: String(state.settings.whisperLanguage || "en"),
+        language: String(state.settings.whisperLanguage || "auto"),
         model: String(state.settings.whisperModel || ""),
         output
       }
